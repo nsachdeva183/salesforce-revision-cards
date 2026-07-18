@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Salesforce Daily Revision</title>
+<style>
+  :root {
+    --dark: #1F3864;
+    --blue: #2E75B6;
+    --accent: #4A7FBF;
+    --light: #DCE9F7;
+    --light2: #EAF1FB;
+    --grey: #F3F3F3;
+    --greytxt: #666;
+    --green: #2E9E5B;
+    --amber: #C98A1E;
+    --red: #C0392B;
+    --white: #fff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+    background: linear-gradient(180deg, #f4f7fc 0%, #eef2f9 100%);
+    margin: 0;
+    color: #222;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 680px; margin: 0 auto; padding: 24px 16px 60px; }
+  header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 18px; flex-wrap: wrap; gap: 10px; }
+  h1 { font-size: 22px; color: var(--dark); margin: 0 0 2px; }
+  .subtitle { color: var(--greytxt); font-size: 13px; }
+  .stats-pill { background: var(--white); border-radius: 12px; padding: 8px 14px; font-size: 13px; color: var(--dark); box-shadow: 0 1px 3px rgba(0,0,0,0.08); text-align: right; }
+  .stats-pill b { color: var(--blue); }
+  .progress-bar { background: var(--grey); border-radius: 8px; height: 10px; overflow: hidden; margin: 14px 0 22px; }
+  .progress-fill { background: linear-gradient(90deg, var(--blue), var(--accent)); height: 100%; transition: width 0.3s; }
+  .card {
+    background: var(--white); border-radius: 16px; padding: 26px 24px;
+    box-shadow: 0 4px 18px rgba(31,56,100,0.10); min-height: 260px;
+    display: flex; flex-direction: column;
+  }
+  .tag-row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .tag { font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 20px; letter-spacing: 0.3px; }
+  .tag.domain { background: var(--light); color: var(--dark); }
+  .tag.type-concept { background: #E8F3EA; color: var(--green); }
+  .tag.type-scenario { background: #FDF1E0; color: var(--amber); }
+  .question { font-size: 18px; font-weight: 600; color: #1a1a1a; line-height: 1.5; margin-bottom: 6px; }
+  .answer-block { margin-top: 16px; padding-top: 16px; border-top: 1px dashed #ddd; display: none; }
+  .answer-block.show { display: block; }
+  .answer-text { font-size: 15px; line-height: 1.6; color: #333; white-space: pre-wrap; }
+  .code-block { background: var(--grey); border-left: 3px solid var(--accent); border-radius: 6px; padding: 12px 14px; margin-top: 12px; font-family: Consolas, Menlo, monospace; font-size: 12.5px; white-space: pre-wrap; color: #333; overflow-x: auto; }
+  .spacer { flex: 1; }
+  .btn-row { display: flex; gap: 10px; margin-top: 20px; }
+  button { cursor: pointer; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; padding: 12px 16px; transition: transform 0.08s, opacity 0.15s; }
+  button:active { transform: scale(0.97); }
+  .btn-reveal { background: var(--dark); color: #fff; width: 100%; padding: 13px; font-size: 15px; }
+  .btn-feedback { flex: 1; }
+  .btn-easy { background: #E8F3EA; color: var(--green); }
+  .btn-medium { background: #FDF1E0; color: var(--amber); }
+  .btn-difficult { background: #FBE7E4; color: var(--red); }
+  .btn-feedback:hover { opacity: 0.85; }
+  .hint { text-align: center; font-size: 11px; color: #aaa; margin-top: 10px; }
+  .done-screen { text-align: center; padding: 50px 20px; }
+  .done-screen h2 { color: var(--dark); }
+  .done-stats { display: flex; justify-content: center; gap: 18px; margin: 22px 0; flex-wrap: wrap; }
+  .done-stat { background: var(--white); border-radius: 12px; padding: 14px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.07); min-width: 90px; }
+  .done-stat .num { font-size: 24px; font-weight: 700; color: var(--dark); }
+  .done-stat .lbl { font-size: 11px; color: var(--greytxt); text-transform: uppercase; letter-spacing: 0.4px; }
+  select { font-size: 13px; padding: 6px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fff; color: var(--dark); }
+  footer { text-align: center; font-size: 11px; color: #aaa; margin-top: 30px; }
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--greytxt); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Salesforce Daily Revision</h1>
+      <div class="subtitle" id="dateLabel"></div>
+    </div>
+    <div class="stats-pill" id="statsPill">Loading…</div>
+  </header>
+
+  <div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+
+  <div id="cardArea"></div>
+
+  <footer>Bank grows weekly · <span id="bankCount">–</span> cards total · progress stored locally in this browser</footer>
+</div>
+
+<script>
+const STORAGE_KEY = "sfRevisionState_v2";
+const DAILY_LIMIT = 10;
+
+function todayStr() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+function addDays(dateStr, days) {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+}
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return { progress: {}, queue: null, queueDate: null, sessionStats: { easy:0, medium:0, difficult:0 }, streak: 0, lastCompletedDate: null };
+}
+function saveState(state) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function nextSchedule(prevInterval, feedback, today) {
+  let interval;
+  if (feedback === "difficult") {
+    interval = 1;
+  } else if (feedback === "medium") {
+    interval = (prevInterval && prevInterval > 0) ? Math.round(prevInterval * 1.8) : 2;
+    interval = Math.max(2, Math.min(interval, 14));
+  } else {
+    interval = (prevInterval && prevInterval > 0) ? Math.round(prevInterval * 2.8) : 4;
+    interval = Math.max(4, Math.min(interval, 60));
+  }
+  return { interval, due: addDays(today, interval) };
+}
+
+function selectTodayQueue(cards, progress, today, limit) {
+  const due = [];
+  const brandNew = [];
+  cards.forEach(c => {
+    const p = progress[c.id];
+    if (!p) brandNew.push(c);
+    else if (p.due <= today) due.push({ card: c, due: p.due });
+  });
+  due.sort((a,b) => a.due < b.due ? -1 : a.due > b.due ? 1 : 0);
+  let queue = due.map(d => d.card);
+  if (queue.length < limit) queue = queue.concat(brandNew.slice(0, limit - queue.length));
+  return queue.slice(0, limit).map(c => c.id);
+}
+
+let CARDS = [];
+let CARD_MAP = {};
+let state = loadState();
+let currentIndex = 0;
+let revealed = false;
+
+async function init() {
+  document.getElementById("dateLabel").textContent = new Date().toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  const res = await fetch("questions.json?_=" + Date.now());
+  CARDS = await res.json();
+  CARD_MAP = {};
+  CARDS.forEach(c => CARD_MAP[c.id] = c);
+  document.getElementById("bankCount").textContent = CARDS.length;
+
+  const today = todayStr();
+  if (!state.queue || state.queueDate !== today) {
+    state.queue = selectTodayQueue(CARDS, state.progress, today, DAILY_LIMIT);
+    state.queueDate = today;
+    state.sessionStats = { easy: 0, medium: 0, difficult: 0 };
+    saveState(state);
+  }
+  currentIndex = state.sessionStats.easy + state.sessionStats.medium + state.sessionStats.difficult;
+  render();
+}
+
+function masteredCount() {
+  const today = todayStr();
+  return Object.values(state.progress).filter(p => p.interval >= 21).length;
+}
+
+function updateStatsPill() {
+  const total = CARDS.length;
+  const mastered = masteredCount();
+  const reviewed = state.sessionStats.easy + state.sessionStats.medium + state.sessionStats.difficult;
+  document.getElementById("statsPill").innerHTML =
+    `<b>${reviewed}/${state.queue.length}</b> today &nbsp;·&nbsp; <b>${mastered}</b> mastered &nbsp;·&nbsp; ${total} total`;
+  document.getElementById("progressFill").style.width = (state.queue.length ? (reviewed/state.queue.length*100) : 0) + "%";
+}
+
+function render() {
+  updateStatsPill();
+  const area = document.getElementById("cardArea");
+  if (currentIndex >= state.queue.length) {
+    renderDone(area);
+    return;
+  }
+  const id = state.queue[currentIndex];
+  const card = CARD_MAP[id];
+  if (!card) { currentIndex++; render(); return; }
+  revealed = false;
+  area.innerHTML = `
+    <div class="card">
+      <div class="tag-row">
+        <span class="tag domain">${card.domain}</span>
+        <span class="tag type-${card.type}">${card.type === "scenario" ? "Scenario" : "Concept"}</span>
+      </div>
+      <div class="question">${escapeHtml(card.question)}</div>
+      <div class="answer-block" id="answerBlock">
+        <div class="answer-text">${escapeHtml(card.answer)}</div>
+        ${card.code ? `<div class="code-block">${escapeHtml(card.code)}</div>` : ""}
+      </div>
+      <div class="spacer"></div>
+      <div id="actionArea">
+        <button class="btn-reveal" onclick="reveal()">Show Answer &nbsp;(space)</button>
+      </div>
+      <div class="hint">Card ${currentIndex+1} of ${state.queue.length}</div>
+    </div>
+  `;
+}
+
+function reveal() {
+  revealed = true;
+  document.getElementById("answerBlock").classList.add("show");
+  document.getElementById("actionArea").innerHTML = `
+    <div class="btn-row">
+      <button class="btn-feedback btn-difficult" onclick="answer('difficult')">Difficult<br><small>repeat tomorrow</small></button>
+      <button class="btn-feedback btn-medium" onclick="answer('medium')">Medium<br><small>a few days</small></button>
+      <button class="btn-feedback btn-easy" onclick="answer('easy')">Easy<br><small>less often</small></button>
+    </div>
+  `;
+}
+
+function answer(feedback) {
+  const id = state.queue[currentIndex];
+  const today = todayStr();
+  const prev = state.progress[id] || { interval: 0, reps: 0 };
+  const { interval, due } = nextSchedule(prev.interval, feedback, today);
+  state.progress[id] = {
+    interval,
+    due,
+    reps: (prev.reps || 0) + 1,
+    lastFeedback: feedback,
+    lastReviewed: today,
+  };
+  state.sessionStats[feedback]++;
+  currentIndex++;
+  saveState(state);
+  render();
+}
+
+function renderDone(area) {
+  const s = state.sessionStats;
+  const total = s.easy + s.medium + s.difficult;
+  if (total === 0 && state.queue.length === 0) {
+    area.innerHTML = `<div class="empty-state">No cards due today — nice work! Check back tomorrow, or the bank will grow with the weekly update.</div>`;
+    return;
+  }
+  area.innerHTML = `
+    <div class="card done-screen">
+      <h2>Session complete 🎉</h2>
+      <p style="color:var(--greytxt)">You reviewed ${total} card${total===1?"":"s"} today.</p>
+      <div class="done-stats">
+        <div class="done-stat"><div class="num" style="color:var(--green)">${s.easy}</div><div class="lbl">Easy</div></div>
+        <div class="done-stat"><div class="num" style="color:var(--amber)">${s.medium}</div><div class="lbl">Medium</div></div>
+        <div class="done-stat"><div class="num" style="color:var(--red)">${s.difficult}</div><div class="lbl">Difficult</div></div>
+      </div>
+      <p style="color:var(--greytxt); font-size:13px;">Come back tomorrow for the next 10. Difficult cards will resurface first.</p>
+    </div>
+  `;
+}
+
+function escapeHtml(str) {
+  if (!str) return "";
+  return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.code === "Space") { e.preventDefault(); if (!revealed && currentIndex < state.queue.length) reveal(); }
+  if (revealed) {
+    if (e.key === "1") answer("difficult");
+    if (e.key === "2") answer("medium");
+    if (e.key === "3") answer("easy");
+  }
+});
+
+init();
+</script>
+</body>
+</html>

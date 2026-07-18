@@ -1,0 +1,1766 @@
+[
+  {
+    "id": "apex-1",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "What's the difference between 'with sharing', 'without sharing', and 'inherited sharing'?",
+    "answer": "'with sharing' enforces the running user's record-level sharing rules for that class; 'without sharing' bypasses them (system context) — used sparingly, for utility classes that must operate across all records. 'inherited sharing' means the class runs with the sharing mode of whatever class called it, defaulting to without sharing if invoked from a context with no sharing declaration — useful for reusable service classes so behavior isn't hardcoded.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-2",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "Do Apex triggers run with sharing or without sharing by default?",
+    "answer": "Triggers can't declare sharing explicitly and always execute in system context (without sharing) by default — enforcing FLS/sharing inside a trigger must be added explicitly (WITH SECURITY_ENFORCED, Security.stripInaccessible(), or delegating DML to a 'with sharing' service class).",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-3",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "How do you prevent SOQL injection in dynamic queries?",
+    "answer": "Prefer static SOQL with bind variables wherever possible. When dynamic SOQL is unavoidable, sanitize input with String.escapeSingleQuotes(), and validate any dynamically-referenced field/object names against a known allow-list rather than raw user input.",
+    "code": "String safeName = String.escapeSingleQuotes(userInput);\nString q = 'SELECT Id FROM Account WHERE Name = \\'' + safeName + '\\'';\nList<Account> accs = Database.query(q);",
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-4",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "How do you enforce field- and object-level security in Apex?",
+    "answer": "For queries, add WITH SECURITY_ENFORCED or WITH USER_MODE. For DML, use Security.stripInaccessible(AccessType.CREATABLE, records) before insert/update. For explicit CRUD checks use Schema.sObjectType.Account.isAccessible()/isCreatable(). Remember 'with sharing' alone only controls record visibility, not field/object permissions.",
+    "code": "List<Account> accs = [SELECT Id, Name, AnnualRevenue FROM Account WITH SECURITY_ENFORCED];\nSObjectAccessDecision decision = Security.stripInaccessible(AccessType.CREATABLE, newAccounts);\ninsert decision.getRecords();",
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-5",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "What is a Mixed DML error and how do you avoid it?",
+    "answer": "It occurs when a transaction performs DML on both 'setup' objects (User, Group, UserRole) and standard/custom objects, since setup DML triggers a sharing recalculation that can't run alongside pending record DML. Fix: move the setup-object DML into an @future or Queueable method so it runs in its own transaction.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-6",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "Explain interfaces in Apex and a real use case.",
+    "answer": "An interface declares method signatures with no implementation; implementing classes supply the bodies, enabling polymorphism. Canonical example: Database.Batchable<SObject> for batch jobs, or a custom Payable interface where different payment processor classes implement the same charge() method so calling code doesn't care which one it's talking to.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-7",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "Before vs after trigger context — when do you use each?",
+    "answer": "Before-triggers run prior to save and are for same-record field validation/defaulting (no extra DML needed). After-triggers run once the record has a committed Id, required for anything touching related records or needing the record's final saved state.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-8",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "How do you make an Apex method callable from LWC/Aura, and what does cacheable=true actually do?",
+    "answer": "Annotate with @AuraEnabled (add cacheable=true for read-only @wire calls). Cacheable methods must not perform DML and use the Lightning Data Service client cache; imperative calls (e.g. button click) should not be cacheable=true, since they need to hit the server fresh — mixing this up is a very common source of stale-data or blocked-invocation bugs.",
+    "code": "public with sharing class AccountController {\n    @AuraEnabled(cacheable=true)\n    public static List<Account> getAccounts() {\n        return [SELECT Id, Name FROM Account WITH USER_MODE LIMIT 50];\n    }\n}",
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-9",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "How would you structure a trigger to stay maintainable at scale?",
+    "answer": "One trigger per object that immediately delegates to a handler class; the handler exposes one method per context and contains the branching logic; actual business logic lives in service classes the handler calls, keeping the trigger itself essentially empty. This avoids order-of-execution ambiguity and makes the logic unit-testable without DML.",
+    "code": "trigger AccountTrigger on Account (before insert, after update) {\n  new AccountTriggerHandler().run(Trigger.new, Trigger.oldMap, Trigger.operationType);\n}",
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-10",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "How do you unit test a class that makes an HTTP callout?",
+    "answer": "Implement HttpCalloutMock (or Test.setMock with a custom/static-resource mock) to return a canned HttpResponse, wrap the call in Test.startTest()/Test.stopTest(), and assert on the parsed result and resulting record changes.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-11",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "What is trigger recursion and how do you prevent it?",
+    "answer": "Recursion occurs when a trigger's own DML re-fires the same trigger (directly or via workflow/flow), eventually hitting the 16-deep stack limit or duplicating side effects. Prevention: a static Boolean 'already run' flag, a static Set<Id> of processed records, or comparing old vs new values so logic only fires on a relevant change.",
+    "code": "public class TriggerHandler {\n  private static Boolean hasRun = false;\n  public static void run() {\n    if (hasRun) return;\n    hasRun = true;\n    // business logic\n  }\n}",
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-12",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "What Apex trigger context variables exist, and what's each for?",
+    "answer": "isInsert/isUpdate/isDelete/isUndelete flag DML type; isBefore/isAfter flag the phase; Trigger.new/Trigger.old are record lists; Trigger.newMap/oldMap key those by Id (oldMap null on insert, newMap unavailable pre-save); Trigger.size gives batch size; operationType gives one enum useful for a shared handler that branches across all contexts.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-13",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "Queueable vs Batch vs Scheduled Apex — how do you decide?",
+    "answer": "Queueable: single async unit, chainable, keeps instance state — good for a mid-size job or a callout a trigger can't do synchronously. Batch: built for very large volumes (up to ~50M), processes in chunks (default 200, max 2000) — ideal for org-wide fixes or nightly aggregation. Scheduled Apex: runs Batch/Queueable on a CRON schedule for recurring jobs.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-14",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "How do you maintain state across batch chunks (e.g. to email a completion summary)?",
+    "answer": "Implement Database.Stateful on the batch class — without it, instance variables reset every execute() chunk. With it, counters persist and can be emailed from finish().",
+    "code": "global class UpdateAccounts implements Database.Batchable<SObject>, Database.Stateful {\n  global Integer successCount = 0;\n  global Integer failureCount = 0;\n  global Database.QueryLocator start(Database.BatchableContext bc) {\n    return Database.getQueryLocator('SELECT Id FROM Account');\n  }\n  global void execute(Database.BatchableContext bc, List<Account> scope) { /* ... */ }\n  global void finish(Database.BatchableContext bc) { /* send email with counts */ }\n}",
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-15",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "Can you call a future method from Batch Apex, or vice versa?",
+    "answer": "No — you can't call @future from Batch Apex (future calls aren't allowed from an already-async context), and batch-to-batch chaining is only allowed from start()/finish(), not execute(). If you need both patterns combined, use Queueable, which chains more flexibly.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-16",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "What are the CPU time and total execution limits for sync vs async Apex?",
+    "answer": "CPU time: 10 seconds synchronous, 60 seconds asynchronous (time in DML/SOQL/SOSL/callouts doesn't count). Total transaction execution time is 10 minutes for both, but other limits (query rows, heap size) are more generous for async — one reason heavy processing gets pushed to Queueable/Batch.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-17",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "A client wants leads auto-assigned to reps by zip code with simple round-robin logic. What do you build?",
+    "answer": "Native Lead Assignment Rules — exactly the simple, criteria-based case they're designed for. Escalate to Flow only if the assignment needs state (true round-robin tracking), and to Apex only if it must call an external territory-management system.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-18",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "Whenever an Opportunity closes as Won, a field on the related Account must update. Design it.",
+    "answer": "An after-update trigger on Opportunity (checking StageName changed to Closed Won) that bulk-queries related Accounts and updates the field in one DML call — or a Record-Triggered Flow if the update is a simple field copy with no branching.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-19",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "Prevent deleting a Contact if it has an active related Opportunity — design it.",
+    "answer": "A before-delete trigger on Contact that queries related Opportunities via Trigger.oldMap.keySet(), filters for open stages, and calls addError() on any match — blocking the delete with a user-facing message. Could equally be a Flow with a before-delete trigger type.",
+    "code": "trigger ContactTrigger on Contact (before delete) {\n  for (Contact c : Trigger.old) {\n    // if related open Opportunity found via query\n    c.addError('Cannot delete a Contact linked to an active Opportunity.');\n  }\n}",
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-20",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "How do you keep a 'Number of Contacts' rollup on Account in sync when Account-Contact is a Lookup (no native rollup)?",
+    "answer": "In order of preference: (1) DLRS managed package — zero-code. (2) A Flow on Contact create/update/delete/undelete recalculating the count. (3) An Apex trigger using aggregate SOQL to bulk-update affected Accounts in one DML call.",
+    "code": "List<AggregateResult> agg = [SELECT COUNT(Id) cnt, AccountId FROM Contact WHERE AccountId IN :accountIds GROUP BY AccountId];",
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-21",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "Enforce 'an Account's Active picklist can go from No to Yes, but never back to No.'",
+    "answer": "A before-update trigger (or a validation rule with ISCHANGED()/PRIORVALUE()) comparing old vs new: if the prior value was Yes and the new value isn't, call addError().",
+    "code": "if (oldAcc.Active__c == 'Yes' && acc.Active__c != 'Yes') {\n  acc.addError('Account cannot be deactivated once active.');\n}",
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-22",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "Automatically escalate Cases untouched for 48 hours — Flow or Apex, and how?",
+    "answer": "A Record-Triggered Flow with a Scheduled Path set to '48 hours after LastModifiedDate,' with a re-evaluation condition so the path is skipped if the Case was updated in the meantime — declarative, self-documenting, no separate CRON job needed.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-23",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "A nightly batch updates millions of records; the client wants a completion email with success/failure counts.",
+    "answer": "Database.Batchable + Database.Stateful, incrementing counters inside execute() with per-record try/catch so one bad record doesn't fail the whole chunk, and sending the summary email from finish().",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-24",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "Batch job of 1,000 records, batch size 200 (5 chunks). Chunk 4 throws an unhandled exception. What happens to the others?",
+    "answer": "Each execute() call is its own transaction — only the failing 200-record chunk rolls back; the other 4 chunks stay committed. This chunk-level (not job-level) atomicity is exactly why Database.Stateful counters and per-record try/catch matter in production batch jobs.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-25",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "A batch job's execute() does a DML update inside a per-record loop instead of bulkified. What breaks?",
+    "answer": "The 150 DML-statements-per-transaction limit gets blown well before the 200-record scope finishes. Fix: collect records into a list and issue one DML call per execute() invocation, not per record.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-26",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "A Queueable job needs to process 5,000 records, beyond what Queueable is meant for. What's your fix?",
+    "answer": "Chain smaller Queueable jobs (each enqueuing the next), or switch to Batch Apex, which is purpose-built for chunked, governor-limit-aware processing at that volume — Batch is the more idiomatic tool once volumes reach the thousands.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "apex-27",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "How do you design retry logic for a callout that intermittently fails due to external rate limiting?",
+    "answer": "Catch the failure, log it with a retry counter, and re-enqueue via Queueable with a capped max-retry count and a staggered re-enqueue interval, to avoid hammering the still-limited endpoint and to stay within your own async job limits.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "security-sharing-28",
+    "domain": "Security & Sharing",
+    "type": "concept",
+    "question": "Walk through Salesforce's record-level security layers, broadest to most specific.",
+    "answer": "Organization-Wide Defaults set the baseline (Private / Public Read-Only / Public Read-Write / Controlled by Parent). Role Hierarchy opens access upward when OWD is more restrictive than Public Read/Write. Sharing Rules (ownership- or criteria-based) grant additional access sideways. Manual sharing grants ad hoc record access. Apex Managed Sharing/Sharing Sets handle programmatic/portal cases. Restriction Rules narrow down what a broader mechanism already grants.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "security-sharing-29",
+    "domain": "Security & Sharing",
+    "type": "concept",
+    "question": "A Master-Detail relationship is converted to Lookup. What happens to sharing?",
+    "answer": "Under Master-Detail the child's sharing was fully controlled by the parent (no independent OWD). After converting, the child gets its own OWD, defaulting to Public Read/Write unless changed — access rules that used to cascade from the parent no longer apply and must be reconfigured explicitly.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "security-sharing-30",
+    "domain": "Security & Sharing",
+    "type": "concept",
+    "question": "How do sharing rules differ from role hierarchy, and when are sharing rules actually needed?",
+    "answer": "Role hierarchy only grants access upward through the management chain. Sharing rules are needed when access must cross the hierarchy sideways — e.g. a support team needs to see records they don't own and aren't above in the chain — via ownership-based or criteria-based rules.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "security-sharing-31",
+    "domain": "Security & Sharing",
+    "type": "concept",
+    "question": "What does 'row cause' mean in an Apex-managed share record?",
+    "answer": "The reason code on a *__Share record explaining why a record is shared with a user/group — standard causes exist (Owner, Manual), and Apex sharing reasons are custom-defined per object, letting you grant and later identify/remove one category of share without disturbing others.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "security-sharing-32",
+    "domain": "Security & Sharing",
+    "type": "concept",
+    "question": "How do 'with sharing' and stripInaccessible() differ, and why do you need both?",
+    "answer": "'with sharing' governs record-level visibility. Security.stripInaccessible() (and WITH SECURITY_ENFORCED/USER_MODE) governs field- and object-level access. A class can be 'with sharing' and still leak a field the user shouldn't see if FLS isn't separately enforced — the two controls are independent.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "security-sharing-33",
+    "domain": "Security & Sharing",
+    "type": "concept",
+    "question": "Client needs to classify and protect fields for GDPR/compliance. What do you recommend?",
+    "answer": "Start with the built-in Data Classification metadata (Confidential, Mission Critical) to document sensitive fields, apply FLS/permission sets to restrict visibility, and layer in Salesforce Shield Platform Encryption where regulatory encryption-at-rest is required, with Field Audit Trail for compliance history.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "security-sharing-34",
+    "domain": "Security & Sharing",
+    "type": "concept",
+    "question": "What's the difference between a profile and a permission set, and when do permission set groups help?",
+    "answer": "A profile is a single mandatory baseline assigned to exactly one user; permission sets are additive across any number of users regardless of profile. Best practice: minimal profiles (login/session settings) plus permission sets for feature access. Permission set groups bundle several permission sets into one assignable unit, e.g. a role made of 4 underlying sets.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "security-sharing-35",
+    "domain": "Security & Sharing",
+    "type": "scenario",
+    "question": "A sharing rule grants a group access to records matching criteria, but a subset of those records must be hidden from that same group.",
+    "answer": "Restriction Rules — they narrow down whatever OWD/role/sharing-rule access already exists, exactly the 'grant broad, then restrict a subset' pattern (supported on custom objects, external objects, and select standard objects).",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "security-sharing-36",
+    "domain": "Security & Sharing",
+    "type": "scenario",
+    "question": "Class Outer ('with sharing') calls Class Inner ('without sharing'). What sharing context does Inner's method run in?",
+    "answer": "Inner classes don't inherit the outer class's sharing declaration — Inner runs in whatever mode it declares itself, independent of the caller. Sharing is a property of the class definition, not the call stack.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "security-sharing-37",
+    "domain": "Security & Sharing",
+    "type": "scenario",
+    "question": "An LWC-facing Apex method must respect the running user's field permissions dynamically, without a hardcoded field allow-list.",
+    "answer": "Query with WITH USER_MODE (or WITH SECURITY_ENFORCED) so the platform enforces FLS/CRUD automatically based on the user's actual permissions, rather than a manually-coded check that drifts out of sync as permission sets change.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "security-sharing-38",
+    "domain": "Security & Sharing",
+    "type": "scenario",
+    "question": "A regulated-industry client needs certain fields encrypted at rest while remaining searchable.",
+    "answer": "Shield Platform Encryption using deterministic encryption where exact-match filtering is required (probabilistic is stronger but blocks filtering), paired with Field Audit Trail for compliance history and Data Classification metadata for documentation.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "security-sharing-39",
+    "domain": "Security & Sharing",
+    "type": "scenario",
+    "question": "A global sales team must only see Opportunities for their own region.",
+    "answer": "OWD Private on Opportunity, roles/territories structured by region, plus criteria-based Sharing Rules (Region__c = value shared with the matching group) or Territory Management if the org already models regions that way; fall back to Apex managed sharing only for cases the standard model can't express.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "security-sharing-40",
+    "domain": "Security & Sharing",
+    "type": "scenario",
+    "question": "How do you audit which users/profiles have inappropriate access to a highly sensitive custom object before a compliance review?",
+    "answer": "Use Object Manager's field/object access viewer and permission set/profile assignment reports rather than manual profile-by-profile inspection; review sharing rules and manual shares too, and use Security Health Check / Shield Event Monitoring for deeper access-pattern auditing (who actually viewed/exported data, not just who theoretically could).",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-security-mandates-41",
+    "domain": "2026 Security Mandates",
+    "type": "concept",
+    "question": "What is 'phishing-resistant MFA,' and who is required to use it?",
+    "answer": "MFA methods that can't be intercepted or replayed by a phishing site because they're cryptographically bound to the legitimate domain — built-in authenticators (Windows Hello, Touch ID/Face ID, Android passkeys) and physical/FIDO2 security keys (e.g. YubiKey). Salesforce Authenticator, SMS codes, email codes, TOTP apps, and push notifications do not qualify. This is being enforced specifically for privileged users: anyone with the System Administrator profile, or the Modify All Data, View All Data, Customize Application, or Author Apex permissions — recognizing that compromising an admin account is the highest-value target for an attacker.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-security-mandates-42",
+    "domain": "2026 Security Mandates",
+    "type": "concept",
+    "question": "How is 'MFA for all users' different from 'phishing-resistant MFA for privileged users,' and why does Salesforce treat them separately?",
+    "answer": "MFA for all users is the broader requirement that every internal user complete some form of MFA (any registered method, not necessarily phishing-resistant) on login. Phishing-resistant MFA is a stricter subset requirement applying only to privileged/admin-level users, since they represent higher risk if compromised. Salesforce enforces them on separate (and independently adjustable) timelines — notably, the general MFA-for-all-users rollout was paused and rescheduled in mid-2026 due to an enrollment bug, while the privileged-user phishing-resistant requirement proceeded on its original schedule, illustrating that these are genuinely distinct controls, not two names for the same rule.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-security-mandates-43",
+    "domain": "2026 Security Mandates",
+    "type": "concept",
+    "question": "What is the new email-sending domain verification requirement, and why was it introduced?",
+    "answer": "Salesforce now refuses to deliver outbound email from a sending domain that hasn't been verified as actually owned by the org, even if the individual sender's email address was previously verified — closing a gap that let spoofed or look-alike domains send mail that appeared to originate from Salesforce. Verification is done via an active DKIM key per domain/subdomain (the recommended approach, since it cryptographically signs outbound mail) or, as a fallback, a verified entry in the Authorized Email Domains list in Setup. Common public webmail domains (Gmail, Outlook, Hotmail) are exempted from domain-level verification since Salesforce doesn't expect orgs to own those domains.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-security-mandates-44",
+    "domain": "2026 Security Mandates",
+    "type": "concept",
+    "question": "What changed around anonymizing VPNs, proxies, and 'high-risk' IP addresses?",
+    "answer": "Salesforce now actively monitors for logins originating from anonymizing VPNs, proxies, or IP ranges it classifies as high-risk, and automatically freezes the affected user's account rather than just logging or flagging the event — with a notification sent to System Administrators when it happens. This shifts IP-based risk detection from something admins had to configure themselves (Login IP Ranges on a profile) to something Salesforce enforces platform-wide by default.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-security-mandates-45",
+    "domain": "2026 Security Mandates",
+    "type": "concept",
+    "question": "What is the new Transaction Security Policy behavior for report exports, and who does it affect?",
+    "answer": "For orgs using Salesforce Shield or Event Monitoring, Salesforce will automatically create and enable a Transaction Security Policy on ReportEvent if the org doesn't already have one, requiring users to pass an MFA/step-up challenge before exporting more than a set threshold of records from a report. Managing these policies now requires both the Modify Transaction Security Policy and Customize Application permissions — a deliberate separation so report-export security policy can't be silently changed by anyone who merely has general admin/customize rights.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-security-mandates-46",
+    "domain": "2026 Security Mandates",
+    "type": "concept",
+    "question": "What is 'step-up authentication' on report activity, and how is it different from just being logged in with MFA?",
+    "answer": "Even a user who is already fully authenticated with MFA will be prompted for an additional, fresh authentication challenge specifically when exporting a report (and, separately, when anomalous export behavior is detected by Salesforce's monitoring) — because a stolen, already-authenticated session shouldn't be sufficient on its own to bulk-export sensitive data. If the user has no MFA method enrolled, Salesforce falls back to an email/SMS one-time password; if none of that is available, the export is simply blocked.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-security-mandates-47",
+    "domain": "2026 Security Mandates",
+    "type": "scenario",
+    "question": "A client's System Administrator logs in only through SSO and has never registered a Salesforce-native MFA method. How do you assess whether they're compliant with the phishing-resistant MFA requirement?",
+    "answer": "Don't assume SSO automatically satisfies it — Salesforce evaluates whether the identity provider's authentication method returned at login is itself 'strong enough' (e.g. the IdP enforced a hardware key or platform biometric), and if it can't verify that, it will still require enrollment in a Salesforce-recognized phishing-resistant method. The right first step is testing the actual SSO login flow against the requirement in a sandbox rather than assuming SSO is a blanket exemption.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-security-mandates-48",
+    "domain": "2026 Security Mandates",
+    "type": "scenario",
+    "question": "Your org sends transactional emails from marketing@yourcompany.com and notifications@a-subdomain.yourcompany.com. After the domain verification rollout, some of these emails silently stop being delivered. What's the likely cause and fix?",
+    "answer": "Each domain and subdomain needs its own separate verification — verifying the root domain doesn't automatically cover a subdomain. Audit every distinct sending domain/subdomain in use (Email Templates, Flow email actions, Apex Messaging.SingleEmailMessage senders, any integration sending mail through Salesforce) and confirm each has an active DKIM key or an entry in Authorized Email Domains, rather than assuming one verification covers the whole company's mail estate.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-security-mandates-49",
+    "domain": "2026 Security Mandates",
+    "type": "scenario",
+    "question": "A client asks you to disable MFA for a service account used by a nightly integration job, since 'it's not a real user.' How do you advise them given the 2026 requirement changes?",
+    "answer": "Clarify that the 'Waive Multi-Factor Authentication for Exempt Users' permission no longer reliably applies to users who authenticate through the Salesforce UI, and that this exemption path is being tightened specifically because bots/service accounts logging in through interactive channels are a common attack vector. If the integration genuinely needs non-interactive access, the correct pattern is a dedicated integration user authenticating via API-only access (OAuth/JWT bearer flow, Connected App), not a UI-login service account riding on an MFA waiver — and any existing waiver-dependent automation should be flagged for remediation before enforcement rather than after it breaks.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-security-mandates-50",
+    "domain": "2026 Security Mandates",
+    "type": "scenario",
+    "question": "A field rep on a sales team suddenly gets frozen out of their account while working from a hotel using the hotel's shared Wi-Fi/VPN. Support escalates it to you as 'Salesforce is broken.' How do you triage it?",
+    "answer": "Recognize this as the expected behavior of the anonymizing-VPN/high-risk-IP detection, not a bug — check whether the System Administrator received the automated freeze notification, and if the login was legitimate, unfreeze the user and consider whether an exemption request via Salesforce Support is warranted for a known, recurring travel pattern rather than treating each instance as an ad hoc unblock.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-security-mandates-51",
+    "domain": "2026 Security Mandates",
+    "type": "scenario",
+    "question": "A client's sales operations team runs large report exports every morning as part of their daily routine, and after a platform update they're suddenly being asked to re-authenticate every time, even though they're already logged in. Why, and how do you set expectations?",
+    "answer": "This is the step-up authentication control on report export/activity working as intended — a fresh MFA challenge is required specifically for high-risk actions like large exports, on a timed interval (120 minutes by default, admin-configurable), independent of the user's normal session login. Set expectations that this is now baseline platform behavior on report exports rather than a misconfiguration, confirm all affected users have a registered MFA method (with email/SMS OTP as a fallback) so the challenge doesn't turn into a hard block, and evaluate whether the configurable interval can be tuned to reduce friction for this specific legitimate workflow.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-security-mandates-52",
+    "domain": "2026 Security Mandates",
+    "type": "scenario",
+    "question": "How do you advise a client who's frustrated that Salesforce announced an MFA enforcement date, then paused and rescheduled it partway through their rollout project?",
+    "answer": "Reassure them the pause doesn't invalidate the prep work already done (device enrollment, policy configuration) — it only shifts the enforcement date, and Salesforce has been explicit that the requirement itself isn't being cancelled. Recommend continuing the rollout on the client's own timeline rather than stopping, since being MFA-compliant ahead of any enforcement date is strictly beneficial, and build a habit of checking the relevant Salesforce Help articles directly (rather than a fixed date memorized from a blog post) before any go-live tied to a security enforcement deadline, since these dates have already moved once.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "integration-apis-53",
+    "domain": "Integration & APIs",
+    "type": "concept",
+    "question": "How do you securely store credentials for an outbound callout?",
+    "answer": "Named Credentials, first choice — Salesforce stores and injects auth (Basic, OAuth 2.0, JWT bearer) so code never touches raw secrets, and the endpoint becomes swappable per environment without code changes. Fall back to a protected Custom Metadata Type only if Named Credentials can't model the auth scheme — never hardcode credentials.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "integration-apis-54",
+    "domain": "Integration & APIs",
+    "type": "concept",
+    "question": "Design a REST callout with proper error handling.",
+    "answer": "Named Credentials for endpoint/auth, HttpRequest for method/headers/JSON body, wrap Http().send() in try/catch, explicitly check response.getStatusCode() before parsing, and log failures with enough context to retry rather than silently swallowing errors.",
+    "code": "HttpRequest req = new HttpRequest();\nreq.setEndpoint('callout:My_Named_Credential/api/orders');\nreq.setMethod('POST');\nreq.setHeader('Content-Type', 'application/json');\nreq.setBody(JSON.serialize(payload));\nHttpResponse res = new Http().send(req);\nif (res.getStatusCode() == 200) {\n  Map<String, Object> result = (Map<String, Object>) JSON.deserializeUntyped(res.getBody());\n} else {\n  // log + handle non-200\n}",
+    "added": "2026-07-18"
+  },
+  {
+    "id": "integration-apis-55",
+    "domain": "Integration & APIs",
+    "type": "concept",
+    "question": "How does an external system push data into Salesforce in near-real-time?",
+    "answer": "Standard REST/SOAP API for simple create/update, Bulk API for volume. For continuous near-real-time sync, Platform Events (external system publishes, Salesforce subscribes) or Change Data Capture the other direction. Web-to-Lead/Web-to-Case for simple unauthenticated public form submissions.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "integration-apis-56",
+    "domain": "Integration & APIs",
+    "type": "concept",
+    "question": "REST vs SOAP for a new integration, and how do you ensure idempotency?",
+    "answer": "REST is the default today (lighter JSON payloads, better tooling, Composite/GraphQL APIs); SOAP mainly matters for legacy WSDL-only middleware. For idempotency, design upsert-style endpoints keyed by an External ID field so retried/duplicate requests don't create duplicates.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "integration-apis-57",
+    "domain": "Integration & APIs",
+    "type": "concept",
+    "question": "How do you avoid governor limits during a large data import via API?",
+    "answer": "Use Bulk API 2.0 rather than standard REST/SOAP for high-volume loads — it's designed around governor limits. Validate in a sandbox first, watch for data skew (lock contention from many children under one parent), and disable non-essential automation during the load.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "integration-apis-58",
+    "domain": "Integration & APIs",
+    "type": "concept",
+    "question": "What's the recommended way to connect B2B Commerce, CPQ, and an external ERP together?",
+    "answer": "Use Salesforce's official Commerce–CPQ Connector where its pricing/bundle support suffices; build custom on top of the APIs where it isn't. For the ERP leg, evaluate an integration platform (e.g. MuleSoft) once more than 2–3 systems need to talk to each other, rather than hand-rolled point-to-point Apex callouts.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "integration-apis-59",
+    "domain": "Integration & APIs",
+    "type": "scenario",
+    "question": "Real-time two-way sync is needed between Salesforce and an external order management system.",
+    "answer": "Outbound: Platform Events or a trigger-driven Queueable callout via Named Credentials. Inbound: a REST resource (or standard Composite/sObject API) with an External ID field for idempotent upserts, so retried inbound messages don't duplicate records.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "integration-apis-60",
+    "domain": "Integration & APIs",
+    "type": "scenario",
+    "question": "An external RESTful service requires OAuth 2.0 and the integration must survive token expiry gracefully.",
+    "answer": "Named Credentials configured with the right OAuth 2.0 flow (or JWT bearer for non-interactive service-to-service auth) so Salesforce handles token refresh automatically, avoiding hand-rolled token storage/refresh logic.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "integration-apis-61",
+    "domain": "Integration & APIs",
+    "type": "scenario",
+    "question": "A client wants a Data Warehouse fed from several Salesforce objects (Orders, Products, Pricing) to generate invoices externally.",
+    "answer": "Resolve which system masters which data first (avoid dual-mastership of the same field), then decide push (Platform Events/CDC) vs. pull (warehouse polls via Bulk API) based on required data freshness and the warehouse's ingestion capability.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "integration-apis-62",
+    "domain": "Integration & APIs",
+    "type": "scenario",
+    "question": "An inbound webhook from a third party needs to create/update Salesforce records without a bespoke Apex REST class per object.",
+    "answer": "Where the payload maps cleanly, the standard REST API's composite/sObject endpoints (with External-ID upsert) often remove the need for a custom @RestResource entirely; write one only when the payload genuinely needs transformation before persisting.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "integration-apis-63",
+    "domain": "Integration & APIs",
+    "type": "scenario",
+    "question": "How do you design an integration so a Salesforce outage doesn't permanently lose data on the external side?",
+    "answer": "Design the sender to queue and retry rather than fire-and-forget — Platform Events (which persist and redeliver) or a custom retry queue object with a scheduled Apex job re-attempting failed callouts, instead of a synchronous callout with no fallback.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "integration-apis-64",
+    "domain": "Integration & APIs",
+    "type": "scenario",
+    "question": "You inherit an integration with hardcoded credentials in Apex and no error handling. How do you remediate safely?",
+    "answer": "Rotate the exposed credential immediately (assume compromised), migrate storage to Named Credentials with sandbox testing against the same endpoint, then add proper try/catch and logging — remediate in stages behind Custom Metadata feature toggles rather than one risky big-bang rewrite.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "lwc-javascript-65",
+    "domain": "LWC & JavaScript",
+    "type": "concept",
+    "question": "@wire vs an imperative Apex call in LWC — how do you choose?",
+    "answer": "@wire is declarative/reactive, re-running when its parameters change and benefiting from Lightning Data Service caching (pairs with cacheable=true). Use an imperative call when you control exactly when the call fires, need to perform DML, or must await the result — imperative methods should not be cacheable=true.",
+    "code": "import getAccounts from '@salesforce/apex/AccountController.getAccounts';\n\n@wire(getAccounts) accounts;\n\nhandleClick() {\n  getAccounts().then(r => { this.accounts = r; }).catch(e => { this.error = e; });\n}",
+    "added": "2026-07-18"
+  },
+  {
+    "id": "lwc-javascript-66",
+    "domain": "LWC & JavaScript",
+    "type": "concept",
+    "question": "How do sibling LWCs communicate without a direct parent-child relationship?",
+    "answer": "Lightning Message Service (LMS): define a message channel, one component publishes, any subscribed component (regardless of DOM position, even across Aura/LWC/Visualforce) receives it — the correct tool specifically because there's no direct ancestor/descendant path.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "lwc-javascript-67",
+    "domain": "LWC & JavaScript",
+    "type": "concept",
+    "question": "Explain event bubbling/composition for child-to-grandparent communication.",
+    "answer": "Custom events don't cross the shadow DOM boundary by default. Setting bubbles: true and composed: true when dispatching lets a grandparent (or higher) catch an event from a deep child, at the cost of looser coupling — use LMS instead if components aren't in a strict ancestor chain.",
+    "code": "this.dispatchEvent(new CustomEvent('itemselected', {\n  detail: { id: this.recordId },\n  bubbles: true,\n  composed: true,\n}));",
+    "added": "2026-07-18"
+  },
+  {
+    "id": "lwc-javascript-68",
+    "domain": "LWC & JavaScript",
+    "type": "concept",
+    "question": "How do you make an LWC configurable by an Admin in App Builder, without code changes?",
+    "answer": "Define <property> tags inside <targetConfig> in the component's .js-meta.xml, scoped to the relevant target (e.g. lightning__RecordPage), optionally restricted to specific object types — the admin then sees those as configurable fields in App Builder.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "lwc-javascript-69",
+    "domain": "LWC & JavaScript",
+    "type": "concept",
+    "question": "An imperative Apex call throws an unexpected LimitException. Likely root cause?",
+    "answer": "The Apex method is likely marked @AuraEnabled(cacheable=true) while invoked imperatively rather than via @wire — cacheable methods run read-only and can't perform DML. Fix: split into a cacheable read method for @wire and a separate non-cacheable method for the imperative DML call.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "lwc-javascript-70",
+    "domain": "LWC & JavaScript",
+    "type": "concept",
+    "question": "Deep copy vs shallow copy — why does it matter in LWC state management?",
+    "answer": "A shallow copy (spread/Object.assign) copies top-level properties only; nested objects/arrays remain shared references, so mutating a nested field on the 'copy' mutates the original too — a common reactivity bug source. A deep copy (JSON.parse(JSON.stringify(obj)) for simple data) fully detaches nested structures.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "lwc-javascript-71",
+    "domain": "LWC & JavaScript",
+    "type": "concept",
+    "question": "How do you handle pagination for large datasets in a Lightning component?",
+    "answer": "Paginate server-side in the Apex controller (LIMIT/OFFSET or keyset pagination) rather than pulling everything to the client and slicing in JavaScript — keeps SOQL/heap limits under control and improves perceived performance.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "lwc-javascript-72",
+    "domain": "LWC & JavaScript",
+    "type": "concept",
+    "question": "Migrating a legacy Visualforce page to LWC — what's your approach?",
+    "answer": "Break the page into logical reusable pieces rather than a 1:1 port, use standard Lightning Data Service/UI API components where possible, replace controller extensions with @AuraEnabled Apex methods, and interop-wrap any single piece that genuinely isn't LWC-supported yet rather than blocking the whole migration.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "lwc-javascript-73",
+    "domain": "LWC & JavaScript",
+    "type": "scenario",
+    "question": "A record-edit LWC needs to show real-time validation before the user clicks Save.",
+    "answer": "Use lightning-input/lightning-record-edit-form's client-side validation (reportValidity()) for immediate feedback, reserving an Apex round-trip only for validations needing server-side data (e.g. uniqueness checks).",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "lwc-javascript-74",
+    "domain": "LWC & JavaScript",
+    "type": "scenario",
+    "question": "Multiple unrelated LWCs across a page need to react when one updates shared data.",
+    "answer": "Lightning Message Service with a defined message channel — the correct tool because the components aren't in a parent-child relationship, so @api props and bubbled events (which need a DOM ancestor path) can't reach across unrelated trees.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "lwc-javascript-75",
+    "domain": "LWC & JavaScript",
+    "type": "scenario",
+    "question": "A component shows stale data because of @wire's caching, even though server data changed.",
+    "answer": "Call refreshApex(wiredResult) right after any mutation that invalidates the cached data, rather than abandoning @wire entirely for an imperative-only pattern — this preserves reactivity while forcing a refresh exactly when needed.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "lwc-javascript-76",
+    "domain": "LWC & JavaScript",
+    "type": "scenario",
+    "question": "A Lightning page needs a custom action available on both Mobile and Desktop, calling an external service.",
+    "answer": "Build it as an LWC (mobile-first framework support), expose the external call via an Apex method, add it as a Quick Action on the record page, and explicitly verify any APIs used have Mobile SDK parity.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "lwc-javascript-77",
+    "domain": "LWC & JavaScript",
+    "type": "scenario",
+    "question": "How do you keep a complex LWC maintainable as business logic grows, avoiding a 1000-line component?",
+    "answer": "Extract pure business logic into unit-testable plain JS utility modules, split the UI into smaller child components with clear @api/event contracts, and push data-access logic into Apex rather than replicating server logic client-side.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-78",
+    "domain": "Sales Cloud",
+    "type": "concept",
+    "question": "What's the core Sales Cloud object model?",
+    "answer": "Lead → converts into Account/Contact/Opportunity; Opportunity carries Products via OpportunityLineItems linked to a Pricebook/PricebookEntry; Quote/Order/Contract sit downstream of a won Opportunity. A senior developer should know how these connect end-to-end, not just each object in isolation.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-79",
+    "domain": "Sales Cloud",
+    "type": "concept",
+    "question": "Walk through Lead conversion — what happens under the hood, and what's customizable?",
+    "answer": "Conversion creates (or matches/updates) an Account, Contact, and optionally an Opportunity, copying mapped fields per the Lead field mapping configuration; you can customize field mapping, control whether an Opportunity is auto-created, and hook in Apex (e.g. a Lead Convert trigger context or an invocable action) to run custom logic like territory assignment at conversion time.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-80",
+    "domain": "Sales Cloud",
+    "type": "concept",
+    "question": "How do Opportunity Stages, Sales Processes, and Record Types relate to each other?",
+    "answer": "A Sales Process defines an ordered subset of the global Stage picklist values for a given business line; a Record Type is then linked to that Sales Process (via Business Process assignment) so different segments (e.g. Enterprise vs. SMB) can have entirely different stage progressions and page layouts on the same Opportunity object.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-81",
+    "domain": "Sales Cloud",
+    "type": "concept",
+    "question": "What does Collaborative Forecasting require to set up, and what can it show?",
+    "answer": "Requires Forecast Types enabled (Opportunity-based, or custom via forecast categories), a Role Hierarchy that defines rollup relationships, and forecast-enabled Opportunity fields (Amount, Quantity, or custom). It shows rollups by owner up the management chain, adjustable by managers, and can forecast by multiple categories (Product Family, etc.) simultaneously in recent releases.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-82",
+    "domain": "Sales Cloud",
+    "type": "concept",
+    "question": "When do you use Enterprise Territory Management over standard role-hierarchy-based sharing?",
+    "answer": "When Opportunity/Account visibility needs to follow criteria more complex than ownership or a strict management chain — e.g. multiple overlapping territories per Account (by region + industry + revenue tier) with territory-based forecasting rollups. It's a heavier setup, so it's justified once role hierarchy plus basic sharing rules genuinely can't express the access model.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-83",
+    "domain": "Sales Cloud",
+    "type": "concept",
+    "question": "Quote vs Order vs Contract — what's each for?",
+    "answer": "Quote formally documents proposed pricing/terms sent to a customer before commitment; Contract represents an agreed, often signed, legal agreement (with start date/term); Order represents a confirmed request to deliver products/services, often generated from a won Opportunity/Contract and used to trigger fulfillment or revenue recognition downstream.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-84",
+    "domain": "Sales Cloud",
+    "type": "concept",
+    "question": "Path vs Flow for guiding a rep through Opportunity stages — when do you use which?",
+    "answer": "Path is purely a UI guidance layer (key fields, guidance text per stage) with no automation power. Use Flow (or a validation rule) when you need to actually enforce something — e.g. block moving to a stage until required fields are populated — since Path alone won't stop an invalid save.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-85",
+    "domain": "Sales Cloud",
+    "type": "concept",
+    "question": "In Salesforce CPQ, what's the difference between a Price Rule and a Product Rule?",
+    "answer": "Product Rules validate or automatically adjust which products/options can be selected together (e.g. requiring an add-on, or blocking incompatible combinations). Price Rules calculate or adjust pricing/field values on the quote line based on conditions (e.g. apply a discount tier once quantity crosses a threshold). Both are declarative configuration rather than Apex, which is CPQ's intended extensibility model before reaching for custom code.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-86",
+    "domain": "Sales Cloud",
+    "type": "scenario",
+    "question": "A rep closes a deal (Closed Won), but the handoff to Finance and Customer Success for onboarding is still done manually by email and regularly gets missed.",
+    "answer": "A Record-Triggered Flow on Opportunity (entry condition: Stage = Closed Won) that creates onboarding Tasks/records for Finance and CS and sends structured notifications — replacing the manual email handoff with a repeatable, auditable automated step.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-87",
+    "domain": "Sales Cloud",
+    "type": "scenario",
+    "question": "The business wants materially different sales processes for Enterprise (long, multi-stage, approval-heavy) vs. SMB (fast, few stages) deals on the same Opportunity object.",
+    "answer": "Two Sales Processes (different Stage subsets), two matching Opportunity Record Types linked to each Business Process, with distinct page layouts and (if needed) distinct validation rules/approval processes per record type — a single Opportunity object supporting two genuinely different workflows.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-88",
+    "domain": "Sales Cloud",
+    "type": "scenario",
+    "question": "Duplicate Leads and Contacts are piling up from multiple inbound sources (web forms, trade shows, imports).",
+    "answer": "Configure native Duplicate Rules and Matching Rules (fuzzy matching on email/name/company) to block or flag duplicates at entry, and use a scheduled/batch dedupe pass (or an AppExchange dedupe tool) for the existing backlog rather than manual cleanup.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-89",
+    "domain": "Sales Cloud",
+    "type": "scenario",
+    "question": "A quote needs manager approval when a discount exceeds 20%, and VP approval above 40%, before it can be sent to the customer.",
+    "answer": "A multi-step Approval Process on the Quote (or CPQ Quote) object with tiered entry criteria per step, routing to the Sales Manager role at the first threshold and VP role at the second — enforced so the 'Present/Send Quote' action is blocked until approval status is Approved.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-90",
+    "domain": "Sales Cloud",
+    "type": "scenario",
+    "question": "Forecast rollups need to work across business units that transact in different currencies.",
+    "answer": "Enable Advanced Currency Management / use the corporate currency conversion rates so forecast rollups convert consistently at the org's dated exchange rates rather than a single static rate, and confirm the forecast rollup logic is reading converted amounts, not raw local-currency Amount values.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-91",
+    "domain": "Sales Cloud",
+    "type": "scenario",
+    "question": "Renewal Opportunities should be created automatically as a Contract's end date approaches.",
+    "answer": "A scheduled Flow (or Scheduled Apex/batch, if the volume or logic is complex) that queries Contracts nearing EndDate within a lead-time window and creates a linked renewal Opportunity pre-populated from the expiring Contract/Order, assigned to the original owner.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-92",
+    "domain": "Sales Cloud",
+    "type": "scenario",
+    "question": "A CPQ implementation needs complex, conditional bundle discounting that Price Rules alone can't cleanly express.",
+    "answer": "Push as much as possible through Price Rules/Product Rules first since that's CPQ's supported extensibility path (upgrade-safe); reach for a custom Apex pricing callback/plugin only for the genuinely complex conditional math Price Rules can't express, keeping the custom logic isolated so CPQ package upgrades don't break it.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "sales-cloud-93",
+    "domain": "Sales Cloud",
+    "type": "scenario",
+    "question": "Sales leadership wants a single pipeline view across multiple business units that use different Opportunity Record Types and stage sets.",
+    "answer": "A reporting layer (a unified Report Type or dashboard built on Opportunity with a normalization field, e.g. a formula mapping each Record Type's stages into a common 'stage stage bucket') rather than trying to force every business unit onto one Sales Process — preserve each unit's own process while normalizing only at the reporting layer.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-94",
+    "domain": "Service Cloud",
+    "type": "concept",
+    "question": "What's the core Case lifecycle and the automation tools around it?",
+    "answer": "A Case is created (manually, Email-to-Case, Web-to-Case, API, or a channel like chat/messaging), routed via Assignment Rules or Omni-Channel, worked by an agent, and closed. Escalation Rules can reassign/notify based on time-in-status; Case Milestones/Entitlements track SLA compliance throughout.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-95",
+    "domain": "Service Cloud",
+    "type": "concept",
+    "question": "Skills-based vs. queue-based Omni-Channel routing — when do you use each?",
+    "answer": "Queue-based routing sends work to any agent watching a queue (simple, good for homogeneous work). Skills-based routing matches a case to the specific agent(s) with the required skill (e.g. language, product expertise), which scales better for a support org handling varied, specialized case types.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-96",
+    "domain": "Service Cloud",
+    "type": "concept",
+    "question": "What are Entitlements and Milestones for, and how do they enforce SLAs?",
+    "answer": "An Entitlement defines what level of support a customer/Account is due (e.g. based on a support contract); a Milestone (e.g. First Response, Resolution) attached via an Entitlement Process tracks target/actual times against that SLA, triggering time-based workflow (warnings, escalation) as a milestone approaches or breaches.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-97",
+    "domain": "Service Cloud",
+    "type": "concept",
+    "question": "What is Lightning Knowledge, and how does an article's lifecycle work?",
+    "answer": "Salesforce's native knowledge base, where Knowledge is a standard object with Draft → Published (→ Archived) states and versioning; articles can be surfaced in the Case console, Experience Cloud self-service portals, and to Agentforce agents for grounding, and can be data-categorized for targeted retrieval.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-98",
+    "domain": "Service Cloud",
+    "type": "concept",
+    "question": "Email-to-Case vs Web-to-Case vs API-based Case creation — how do you choose?",
+    "answer": "Email-to-Case for support inboxes (simple, built-in, threading via Reply text); Web-to-Case for public web forms without needing an API integration; API-based (REST/SOAP, or via a middleware layer) when Cases must originate from another system of record and need richer field mapping/validation than the no-code options support.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-99",
+    "domain": "Service Cloud",
+    "type": "concept",
+    "question": "What's Service Cloud Voice, and why would a client use it over a standalone CTI?",
+    "answer": "A native telephony integration (built on Amazon Connect or a partner telephony provider) that surfaces calls directly inside the Case/agent console with features like real-time transcription and Einstein-driven next-best-action, avoiding the swivel-chair experience of a separate, loosely-integrated CTI tool.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-100",
+    "domain": "Service Cloud",
+    "type": "concept",
+    "question": "What's Case Swarming, and when is it used over standard escalation?",
+    "answer": "A collaborative model (often via Slack integration) where a complex Case pulls in the right cross-functional experts into a real-time swarm rather than being escalated linearly through tiers — used for high-complexity or high-priority issues where sequential hand-offs would be too slow.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-101",
+    "domain": "Service Cloud",
+    "type": "concept",
+    "question": "What are the core Field Service objects, and how do they relate?",
+    "answer": "Work Order (the job to be done, often generated from a Case) has one or more Work Order Line Items, each scheduled as a Service Appointment assigned to a Service Resource (technician) with the right Skills, using the Scheduling/Optimization engine to match the best available resource by location, skill, and time window.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-102",
+    "domain": "Service Cloud",
+    "type": "scenario",
+    "question": "Support agents have uneven workload — some are overloaded while others sit idle, and response times are suffering.",
+    "answer": "Implement Omni-Channel Routing (skills-based if case complexity varies, queue-based if the work is homogeneous) so incoming work is distributed by real-time agent capacity rather than manual/first-come assignment, directly improving both balance and response time.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-103",
+    "domain": "Service Cloud",
+    "type": "scenario",
+    "question": "High-priority Cases aren't being resolved fast enough, and there's no visibility into which ones are at risk.",
+    "answer": "Configure an Entitlement Process with Milestones (First Response, Resolution) tied to Priority/Account SLA tier, with time-based warning and escalation actions before a milestone breaches — turning a reactive 'why was this late' conversation into a proactive one.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-104",
+    "domain": "Service Cloud",
+    "type": "scenario",
+    "question": "The support team is overwhelmed by Case volume and needs to reduce load without just hiring more agents.",
+    "answer": "Invest in deflection first: a well-maintained Knowledge base surfaced in self-service (Experience Cloud Help Center) and/or an Agentforce service agent handling common questions and simple actions (order status, password reset) so only genuinely complex cases reach a human agent.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-105",
+    "domain": "Service Cloud",
+    "type": "scenario",
+    "question": "A client wants tiered support (Gold/Platinum) with different response-time guarantees per tier.",
+    "answer": "Multiple Entitlement Processes (or one process with tier-based Milestone criteria) linked to the customer's Entitlement/Service Contract record, so the SLA clock and escalation behavior automatically differ by the tier the Account is actually entitled to.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-106",
+    "domain": "Service Cloud",
+    "type": "scenario",
+    "question": "Cases come in from email, web, phone, and chat, but agents are working from disconnected queues per channel.",
+    "answer": "Route all channels through Omni-Channel so a single agent's capacity is managed centrally regardless of source channel, and standardize intake (Email-to-Case, Web-to-Case, Messaging channels, Service Cloud Voice) so every case lands on the same object with consistent fields for reporting and routing.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-107",
+    "domain": "Service Cloud",
+    "type": "scenario",
+    "question": "A Case must automatically escalate to Tier 2 if the first-response SLA is breached.",
+    "answer": "A Milestone (First Response) on the Entitlement Process with a time-based Milestone Action triggered on approaching/breaching the target — e.g. reassigning the Case owner to a Tier 2 queue and notifying the manager, configured declaratively without custom Apex.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-108",
+    "domain": "Service Cloud",
+    "type": "scenario",
+    "question": "Field Service needs to dispatch the nearest qualified technician for an urgent Work Order.",
+    "answer": "Use the Field Service Scheduling/Optimization engine, which matches Service Appointments to Service Resources based on required Skills, location proximity, and availability, either via automatic scheduling policies or the dispatcher console for manual override on urgent jobs.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "service-cloud-109",
+    "domain": "Service Cloud",
+    "type": "scenario",
+    "question": "The same customer issue is being reported as separate Cases across email, chat, and phone, fragmenting the history.",
+    "answer": "Use Case Merge (for duplicates already identified) and, going forward, configure duplicate detection/matching on key fields (Contact + subject/keyword similarity) so agents are prompted to link to an existing open Case rather than creating a new one for the same issue.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "experience-cloud-110",
+    "domain": "Experience Cloud",
+    "type": "concept",
+    "question": "What is Experience Cloud, and what are the main template types?",
+    "answer": "A platform for building branded digital experiences (portals, self-service sites, forums) for customers, partners, or employees. Key templates: Customer Service (case/knowledge self-service), Partner Central (deal registration, partner enablement), Help Center (knowledge-first), Build Your Own (LWR or Aura, fully custom), and Customer Account Portal (account/order self-service).",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "experience-cloud-111",
+    "domain": "Experience Cloud",
+    "type": "concept",
+    "question": "Member-based vs. login-based licenses — what's the practical difference?",
+    "answer": "Member-based licenses are purchased per named external user regardless of how often they log in. Login-based licenses are purchased as a pool of logins per month shared across users — better suited to a large, infrequently-active user base (e.g. occasional customer self-service) where per-seat licensing wouldn't be cost-effective.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "experience-cloud-112",
+    "domain": "Experience Cloud",
+    "type": "concept",
+    "question": "How is data secured for external users in Experience Cloud?",
+    "answer": "Layered like internal security but with extra guardrails: Profiles/Permission Sets scoped to external user licenses, Sharing Rules and Sharing Sets (which grant access based on the relationship between the external user's Contact/Account and the target record) — plus special attention to the Guest User profile, since a misconfigured guest profile can expose data to unauthenticated visitors.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "experience-cloud-113",
+    "domain": "Experience Cloud",
+    "type": "concept",
+    "question": "LWR (Lightning Web Runtime) vs. Aura sites — when do you choose which for a new site?",
+    "answer": "LWR is the modern, faster-performing, more SEO-friendly runtime and is Salesforce's forward direction — default choice for new sites. Aura templates remain relevant mainly for legacy sites or where a specific component/feature genuinely isn't yet available on LWR.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "experience-cloud-114",
+    "domain": "Experience Cloud",
+    "type": "concept",
+    "question": "What's a Sharing Set, and when do you use it over a standard Sharing Rule?",
+    "answer": "A Sharing Set grants an external (portal) user access to records based on a matching value between a field on the User and a field on the target record (e.g. the user's Account matches the record's Account) — the standard mechanism for portal-user-to-record access that doesn't fit ownership- or role-based sharing.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "experience-cloud-115",
+    "domain": "Experience Cloud",
+    "type": "concept",
+    "question": "What should you check specifically for Guest User security in a public Experience Cloud site?",
+    "answer": "Guest User Sharing Rules were tightened in recent releases specifically because guest profiles are a common source of unintended data exposure — audit exactly what object/field access the Guest profile has, avoid broad 'view all' sharing for guests, and treat the guest profile with the same scrutiny as an anonymous internet-facing API.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "experience-cloud-116",
+    "domain": "Experience Cloud",
+    "type": "scenario",
+    "question": "A customer portal user should see Cases only for their own Account, never another company's.",
+    "answer": "Set Case OWD to Private and use the standard portal sharing model (Contact-to-multiple-Accounts or a Sharing Set scoped to the user's Account) rather than a custom Apex sharing layer — the native model covers this exact requirement.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "experience-cloud-117",
+    "domain": "Experience Cloud",
+    "type": "scenario",
+    "question": "A security review flags that the public (unauthenticated) site's Guest User profile has broader object access than intended.",
+    "answer": "Audit and tighten the Guest User profile's object/field permissions to only what the public pages genuinely need to render, remove any 'Edit'/'View All' access left over from initial setup, and re-test the public pages after tightening to confirm nothing legitimately needed breaks.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "experience-cloud-118",
+    "domain": "Experience Cloud",
+    "type": "scenario",
+    "question": "A partner portal must ensure partner users only see their own deal registrations, not competitors'.",
+    "answer": "Model deal registrations as records owned by (or shared via a Sharing Set to) the partner's Account/Contact, with OWD Private and criteria/ownership-based sharing scoped to each partner's own Account — the same pattern as customer Case isolation, applied to a custom object.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "experience-cloud-119",
+    "domain": "Experience Cloud",
+    "type": "scenario",
+    "question": "A legacy Aura-based community is slow and needs modernizing for performance and SEO.",
+    "answer": "Migrate to an LWR-based site — plan it as a phased rebuild of pages/components (not a like-for-like port, since some Aura components need LWC equivalents), prioritizing the highest-traffic pages first to capture the performance win earliest.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "experience-cloud-120",
+    "domain": "Experience Cloud",
+    "type": "scenario",
+    "question": "A large customer base uses the portal rarely, and per-seat member licensing is getting expensive.",
+    "answer": "Move to login-based licenses, which price by monthly login volume rather than named seats — a better fit for a large but infrequently-active external user base, and revisit periodically as usage patterns (and Salesforce's license offerings) evolve.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "experience-cloud-121",
+    "domain": "Experience Cloud",
+    "type": "scenario",
+    "question": "One org needs to run several visually distinct partner portals for different partner tiers/brands.",
+    "answer": "Use multiple Experience Cloud sites (each with its own theme/branding in Experience Builder) rather than trying to force one site to visually serve multiple brands — sites can still share the same underlying data model and Apex/LWC components, just with brand-specific theming layers.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "agentforce-einstein-ai-122",
+    "domain": "Agentforce & Einstein AI",
+    "type": "concept",
+    "question": "What is Agentforce, and how is it different from a traditional chatbot?",
+    "answer": "Agentforce is Salesforce's autonomous AI agent platform: agents reason over a request, decide which action(s) to take, and execute them against real Salesforce data and processes, rather than following a fixed decision-tree script like a traditional rules-based chatbot. It's built on Topics, Actions, Instructions, and a reasoning engine grounded in the org's own data.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "agentforce-einstein-ai-123",
+    "domain": "Agentforce & Einstein AI",
+    "type": "concept",
+    "question": "What's the difference between a Topic and an Action in Agentforce?",
+    "answer": "A Topic defines the area/intent the agent is scoped to handle (the 'what' of the conversation) — e.g. 'Order Status Inquiries.' An Action is the concrete step the agent executes to resolve the request within that topic (the 'how') — e.g. an invocable Apex/Flow action that queries an Order and returns its status.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "agentforce-einstein-ai-124",
+    "domain": "Agentforce & Einstein AI",
+    "type": "concept",
+    "question": "What is grounding, and what role does Prompt Builder play?",
+    "answer": "Grounding means the agent's responses are anchored to real, specific data (a record, a Knowledge article, a query result) rather than generating unconstrained text. Prompt Builder is the tool for designing the templates/merge fields that inject that grounded, record-specific context into the prompt sent to the underlying model.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "agentforce-einstein-ai-125",
+    "domain": "Agentforce & Einstein AI",
+    "type": "concept",
+    "question": "What is the Einstein Trust Layer, and why does it matter for compliance-sensitive orgs?",
+    "answer": "A security/privacy layer that sits between Salesforce and the underlying LLM: it masks sensitive data before it leaves Salesforce, enforces that customer data isn't retained or used to train external models, and provides audit trails of AI interactions — the piece that lets regulated industries adopt generative AI features with a defensible compliance story.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "agentforce-einstein-ai-126",
+    "domain": "Agentforce & Einstein AI",
+    "type": "concept",
+    "question": "How does Agentforce respect existing Salesforce security (sharing, FLS, CRUD)?",
+    "answer": "Agents operate within the running/context user's existing permissions — field-level security, object permissions, and sharing rules are enforced the same way they would be for a human user or an Apex call made on their behalf, so an agent can't surface data the requesting user couldn't otherwise see.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "agentforce-einstein-ai-127",
+    "domain": "Agentforce & Einstein AI",
+    "type": "concept",
+    "question": "When would you choose Agentforce over building the same requirement in plain Apex/Flow automation?",
+    "answer": "Agentforce fits conversational, multi-step, context-dependent workflows where the exact path isn't fully predictable upfront (e.g. a customer asking an open-ended support question that could resolve several different ways). Deterministic, high-volume, strictly auditable operations (e.g. nightly financial reconciliation) still belong in Apex/Flow, where behavior must be 100% predictable and easily unit-tested.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "agentforce-einstein-ai-128",
+    "domain": "Agentforce & Einstein AI",
+    "type": "scenario",
+    "question": "Design a customer service agent that can look up an order's status and process a return within policy limits.",
+    "answer": "Define a Topic scoped to order/returns inquiries, with Actions built as invocable Apex/Flow methods (get order status, validate return eligibility against policy rules, initiate the return) — the agent orchestrates which action to call based on the conversation, while the actual business logic and guardrails (return window, eligible SKUs) live in the deterministic Apex/Flow layer, not the model itself.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "agentforce-einstein-ai-129",
+    "domain": "Agentforce & Einstein AI",
+    "type": "scenario",
+    "question": "How do you ensure an Agentforce agent never surfaces data the requesting user isn't permitted to see?",
+    "answer": "Rely on the agent running in the context of the actual user (or a scoped context user) so standard FLS/sharing enforcement applies exactly as it would to a manual query or an 'with sharing' Apex call — don't build a separate, parallel permission system for the agent to bypass this.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "agentforce-einstein-ai-130",
+    "domain": "Agentforce & Einstein AI",
+    "type": "scenario",
+    "question": "An agent needs to check external inventory availability before answering a customer's question. How do you architect that?",
+    "answer": "Expose the inventory check as an Action backed by an Apex invocable method that performs the external callout (via Named Credentials) synchronously enough to return within the agent's expected response time, keeping the callout's error handling and retry logic in Apex rather than trying to have the model itself manage integration failures.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "agentforce-einstein-ai-131",
+    "domain": "Agentforce & Einstein AI",
+    "type": "scenario",
+    "question": "How do you reduce the risk of an agent 'hallucinating' or going outside its intended scope?",
+    "answer": "Scope the agent tightly via well-defined Topics and Instructions (explicit guardrails on what it should and shouldn't attempt), ground every substantive answer in real data (records, Knowledge articles) rather than open-ended generation, and test extensively with adversarial/off-topic prompts before go-live.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "agentforce-einstein-ai-132",
+    "domain": "Agentforce & Einstein AI",
+    "type": "scenario",
+    "question": "Give an example of a requirement that should NOT be built as an Agentforce agent.",
+    "answer": "A nightly batch job reconciling millions of financial transactions needs to be 100% deterministic, fully auditable, and unit-testable — that belongs in Batch Apex, not an AI agent, since the business can't tolerate probabilistic reasoning in a process with direct financial/compliance consequences.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "agentforce-einstein-ai-133",
+    "domain": "Agentforce & Einstein AI",
+    "type": "scenario",
+    "question": "How do you design the handoff from an Agentforce agent to a human agent when it can't resolve the request?",
+    "answer": "Define clear escalation conditions (explicit user request, repeated failed attempts, or the topic falling outside the agent's defined scope) that trigger creating/updating a Case and routing it through standard Omni-Channel to a human agent, carrying the conversation transcript/context along so the customer doesn't have to repeat themselves.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "industries-omnistudio-134",
+    "domain": "Industries & OmniStudio",
+    "type": "concept",
+    "question": "What is OmniStudio, and what are its four core tools?",
+    "answer": "A low-code toolset (originally Vlocity) used heavily in Salesforce Industries: OmniScripts (guided, multi-step workflows for end users), DataRaptors (declarative data extract/transform/load between Salesforce and OmniScripts/Integration Procedures), Integration Procedures (server-side, reusable orchestration logic — the closest analog to a 'declarative Apex service method'), and FlexCards (configurable, contextual data display components).",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "industries-omnistudio-135",
+    "domain": "Industries & OmniStudio",
+    "type": "concept",
+    "question": "OmniScript vs. Flow — when would an Industries implementation use which?",
+    "answer": "OmniScript is purpose-built for complex, branded, multi-step guided processes (loan applications, insurance quoting) with tight integration to DataRaptors/Integration Procedures and FlexCards — the default choice in an org already standardized on OmniStudio. Flow remains the better choice for simpler record-triggered automation or when the org isn't otherwise using the OmniStudio toolset.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "industries-omnistudio-136",
+    "domain": "Industries & OmniStudio",
+    "type": "concept",
+    "question": "What's a DataRaptor used for, and what are its main modes?",
+    "answer": "A declarative tool to move and reshape data without Apex: Extract (query Salesforce data into a JSON structure), Transform (reshape/rename/filter a JSON payload), and Load (write a JSON payload into Salesforce records) — commonly chained inside Integration Procedures or called directly from an OmniScript.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "industries-omnistudio-137",
+    "domain": "Industries & OmniStudio",
+    "type": "concept",
+    "question": "Why do Integration Procedures exist when Apex can already do server-side orchestration?",
+    "answer": "Integration Procedures give admins/architects a declarative, reusable way to orchestrate DataRaptors, external callouts, and conditional logic without writing Apex, while still being callable from Apex when needed — reducing governor-limit-sensitive custom code and making the orchestration logic visible/maintainable by non-developers.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "industries-omnistudio-138",
+    "domain": "Industries & OmniStudio",
+    "type": "concept",
+    "question": "What's the core Health Cloud data model concept a developer should know?",
+    "answer": "Health Cloud models a Patient as a Person Account (or a Contact linked appropriately), with Care Plans, Care Plan Templates, and Care Team members representing the clinical relationships and goals — built on top of standard Salesforce objects/sharing rather than a wholly separate data model, so standard security/sharing knowledge still applies.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "industries-omnistudio-139",
+    "domain": "Industries & OmniStudio",
+    "type": "concept",
+    "question": "What's the core Financial Services Cloud data model concept a developer should know?",
+    "answer": "FSC is organized around the Household (a group of related individual clients, often modeled via Person Accounts and Account Contact Relationships) with rollup summaries across linked Financial Accounts, giving advisors a consolidated view of a family's total relationship rather than one client record at a time.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "industries-omnistudio-140",
+    "domain": "Industries & OmniStudio",
+    "type": "scenario",
+    "question": "Build a guided loan application process for a bank on Financial Services Cloud.",
+    "answer": "An OmniScript driving the step-by-step application (personal info, income, documents), using DataRaptors to pre-populate known client data and save collected data back to Salesforce, an Integration Procedure to orchestrate the external credit-check callout and combine its result with internal data, and a FlexCard to summarize the application status back to the banker.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "industries-omnistudio-141",
+    "domain": "Industries & OmniStudio",
+    "type": "scenario",
+    "question": "Model a patient's care team and care plan in Health Cloud.",
+    "answer": "A Care Plan record (linked to the Patient Person Account) with related Care Plan Goals/Problems, and Care Team Members representing each provider's role on that patient's care — using standard sharing so each provider only sees patients they're actually on the care team for, not the whole patient population.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "industries-omnistudio-142",
+    "domain": "Industries & OmniStudio",
+    "type": "scenario",
+    "question": "Model household relationships and rollups for financial accounts in FSC.",
+    "answer": "Person Accounts for individual clients linked via Account Contact Relationships into a Household group; rollup fields (native or via a rollup tool) aggregate each Financial Account's balance up to the Household level, giving an advisor one consolidated view instead of manually summing each client's accounts.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "industries-omnistudio-143",
+    "domain": "Industries & OmniStudio",
+    "type": "scenario",
+    "question": "An insurance quote requires calling an external rating engine mid-process — Integration Procedure or Apex?",
+    "answer": "Default to an Integration Procedure calling the external rating engine, since it keeps the orchestration declarative and visible to non-developers and integrates naturally with the OmniScript/DataRaptor flow already in use; drop to Apex only for the specific piece of transformation/business logic too complex for the Integration Procedure's declarative actions to express cleanly.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "industries-omnistudio-144",
+    "domain": "Industries & OmniStudio",
+    "type": "scenario",
+    "question": "You're migrating a legacy Vlocity implementation to a fresh org. What do you watch for?",
+    "answer": "Confirm the target org's OmniStudio Managed Package version supports every component type in use (older Vlocity-era configurations sometimes rely on deprecated patterns), re-test all DataRaptors/Integration Procedures against the new org's data model rather than assuming a like-for-like config copy works, and validate FlexCard performance at realistic data volumes before cutover.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-145",
+    "domain": "2026 Features & Renaming",
+    "type": "concept",
+    "question": "Why did Salesforce rename Sales Cloud, Service Cloud, Marketing Cloud, and most of its vertical Industry Clouds in 2026?",
+    "answer": "As part of positioning Agentforce as the core platform rather than a bolt-on feature, Salesforce folded its portfolio under the Agentforce brand starting Spring '26: Sales Cloud → Agentforce Sales, Service Cloud → Agentforce Service, Marketing Cloud → Agentforce Marketing, Commerce Cloud → Agentforce Commerce, Field Service Lightning → Agentforce Field Service, and Revenue Cloud (CPQ + Billing) → Agentforce Revenue Management. The underlying products, objects, and configuration are unchanged — it's a branding and roadmap-emphasis shift, not a re-platform, and existing contracts/pricing carry over automatically.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-146",
+    "domain": "2026 Features & Renaming",
+    "type": "concept",
+    "question": "Which Industry Clouds were renamed, and what actually changed underneath?",
+    "answer": "Health Cloud → Agentforce Health, Financial Services Cloud → Agentforce for Financial Services, Nonprofit Cloud → Agentforce 360 for Nonprofits, Education Cloud → Agentforce Education, Automotive Cloud → Agentforce Automotive, and similar for Communications, Consumer Goods, Life Sciences, Media, Net Zero, and Public Sector. Functionally these retain their industry-specific data models, compliance features, and workflows — what changes is the umbrella brand and the roadmap emphasis on industry-tuned AI agents, not the underlying platform a developer works with day to day.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-147",
+    "domain": "2026 Features & Renaming",
+    "type": "concept",
+    "question": "Is Data Cloud renamed to 'Data 360'? How should you answer if asked in an interview?",
+    "answer": "No — as of Spring '26, Data Cloud is still the official product name. 'Data 360' is positioning/marketing language describing Salesforce's unified-data vision (the idea that Data Cloud plus CRM data plus third-party data form the complete view powering Agentforce), not a formal rename. A precise answer distinguishes the product name from the marketing narrative rather than treating them as interchangeable.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-148",
+    "domain": "2026 Features & Renaming",
+    "type": "concept",
+    "question": "What is AgentExchange, and how is it different from AppExchange?",
+    "answer": "AppExchange (since 2005) is Salesforce's general marketplace for apps, components, and consulting listings. AgentExchange launched alongside Agentforce 2dx (Spring '26) as a separate, dedicated marketplace specifically for AI agents, agent skills/actions, and integrations built to run inside the Agentforce framework — think of it as the catalog of what your agents can do, distinct from what humans install on the platform. The two coexist rather than one replacing the other.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-149",
+    "domain": "2026 Features & Renaming",
+    "type": "concept",
+    "question": "Name a few core Salesforce products that were explicitly NOT renamed under the Agentforce brand.",
+    "answer": "AppExchange, Experience Cloud, Slack, Tableau, CRM Analytics, and the Salesforce Platform itself all remain under their existing names as of Summer '26 — useful to know so you don't over-apply the rebrand pattern to products that haven't actually changed.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-150",
+    "domain": "2026 Features & Renaming",
+    "type": "concept",
+    "question": "What changed about Apex's default sharing and data access mode starting with API version 67 (Summer '26)?",
+    "answer": "Two security defaults flipped: database operations in Apex now run in user mode by default (previously system mode), and any class with no explicit sharing declaration now defaults to 'with sharing' instead of 'without sharing.' This is a meaningful shift for senior developers — code relying on the old implicit 'without sharing, system mode' behavior needs to be reviewed for classes that assumed elevated access, since new/updated classes at API 67+ are secure-by-default rather than open-by-default.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-151",
+    "domain": "2026 Features & Renaming",
+    "type": "concept",
+    "question": "What is the Atlas Reasoning Engine, introduced in Spring '26?",
+    "answer": "The reasoning engine underpinning Agentforce: it runs a reasoning loop that analyzes user intent, identifies what data/actions are needed, and executes multi-step actions autonomously — the component responsible for an agent's actual decision-making, as distinct from the Topics/Actions/Instructions that scope and constrain what it's allowed to reason about.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-152",
+    "domain": "2026 Features & Renaming",
+    "type": "concept",
+    "question": "What is Multi-Agent Orchestration (Summer '26), and why does it matter for architecture decisions?",
+    "answer": "It lets multiple Agentforce agents work together as a coordinated team on a single end-to-end workflow (e.g. a sales agent handing a qualified request to a service agent) rather than each agent operating in isolation. Architecturally, this means agent design now needs to consider hand-off contracts between agents, not just a single agent's scope — similar in spirit to designing clean interfaces between microservices.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-153",
+    "domain": "2026 Features & Renaming",
+    "type": "concept",
+    "question": "What LWC-specific developer features shipped in Summer '26, and why do they matter day to day?",
+    "answer": "Live Preview for Lightning Web Components went GA (see component updates in VS Code/browser without a full page reload), and LWC State Manager went GA, giving a more structured, official way to share and manage state across components on the same page rather than hand-rolling pub/sub or prop-drilling patterns.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-154",
+    "domain": "2026 Features & Renaming",
+    "type": "concept",
+    "question": "What changed in Summer '26 around Queues and record access?",
+    "answer": "Queues no longer automatically grant hierarchical access to member records by default — admins can now enable or disable that inheritance per queue, giving much finer control over who actually gets access via queue membership rather than the previous all-or-nothing behavior.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-155",
+    "domain": "2026 Features & Renaming",
+    "type": "concept",
+    "question": "What is happening to Chatter and Lightning Sync, and by when?",
+    "answer": "Chatter is now disabled by default in any new org created from Summer '26 onward (existing orgs are unaffected, but the direction signals an eventual phase-out). Separately, Lightning Sync is being retired — general retirement is April 2027, but orgs syncing via Microsoft 365/Exchange Web Services must migrate to Einstein Activity Capture by August 2026 to avoid an earlier service disruption.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-156",
+    "domain": "2026 Features & Renaming",
+    "type": "concept",
+    "question": "What is Setup with Agentforce, and what problem does it solve for admins?",
+    "answer": "A GA (Summer '26) admin-facing agent built directly into Setup that helps less experienced admins navigate and complete configuration tasks conversationally rather than hunting through Setup menus — built from direct admin feedback, aimed at lowering the barrier to routine configuration work.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-157",
+    "domain": "2026 Features & Renaming",
+    "type": "concept",
+    "question": "What Flow enhancements shipped in Summer '26 worth knowing for a Lead Developer role?",
+    "answer": "Data Table component lookups can now display a record's name (not just its Id) with optional hyperlinking; a new Radio Button Group screen component replaces the old plain radio inputs; and fault paths can now be collapsed on the canvas — all incremental, but collectively reduce the number of cases where teams reach for a custom LWC just to improve a Flow screen's usability.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-158",
+    "domain": "2026 Features & Renaming",
+    "type": "scenario",
+    "question": "A client's renewal paperwork says 'Agentforce Sales Enterprise Edition' but their existing contract says 'Sales Cloud Enterprise Edition.' They're worried their pricing or feature entitlement changed. How do you respond?",
+    "answer": "Reassure them the rename is branding only — same seats, same price, same renewal date, same objects/Flows/Apex underneath. Separately clarify that Agentforce AI agent functionality itself is still a distinct, separately licensed capability: the rename doesn't retroactively grant agent features they weren't already licensed for, so it's worth confirming what their order form actually entitles them to if they want agent capabilities specifically.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-159",
+    "domain": "2026 Features & Renaming",
+    "type": "scenario",
+    "question": "You inherit an Apex codebase written before API version 67. After upgrading the API version on a class, tests start failing with access errors that didn't occur before. Why, and what's your fix?",
+    "answer": "The class likely relied on the old default behavior (system mode, without sharing) to access records/fields the running user couldn't see directly. Bumping the API version opts the class into the new secure-by-default behavior (user mode, with sharing), surfacing previously-masked access gaps. Fix: don't just blanket-declare 'without sharing' to restore old behavior — audit whether the elevated access was actually appropriate, and if so, scope it narrowly (e.g. a small 'without sharing' service class) rather than reverting the whole class's security posture.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-160",
+    "domain": "2026 Features & Renaming",
+    "type": "scenario",
+    "question": "A client wants to add a second AI agent to work alongside their existing Agentforce Service agent — one handling billing questions, the other general support — and wants them to hand off to each other seamlessly.",
+    "answer": "Design this using Multi-Agent Orchestration rather than trying to cram both domains into one agent's Topics: define a clear scope boundary (billing vs. general support) and an explicit hand-off contract (what context/state transfers when one agent routes to the other) so the customer doesn't have to repeat information across the hand-off.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-161",
+    "domain": "2026 Features & Renaming",
+    "type": "scenario",
+    "question": "A long-time admin insists Data Cloud was 'renamed to Data 360' and wants all internal documentation updated to match. How do you handle this technically accurate-sounding but ultimately incorrect claim?",
+    "answer": "Politely clarify the distinction: Data 360 is Salesforce's marketing/positioning term for its unified-data vision, while the actual product name in contracts, Setup, and the API remains Data Cloud as of Spring '26. Recommend keeping internal docs aligned to the contractual/product name (Data Cloud) while noting the Data 360 branding may appear in newer Salesforce marketing material, so nothing breaks if a future formal rename does happen.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "2026-features-renaming-162",
+    "domain": "2026 Features & Renaming",
+    "type": "scenario",
+    "question": "Your org syncs Outlook calendars/contacts via Lightning Sync with Office 365/EWS. What's your migration plan given the Summer '26 announcements?",
+    "answer": "Treat the August 2026 EWS-specific cutoff as the real deadline (not the later April 2027 general Lightning Sync retirement, which doesn't apply to this configuration), plan the migration to Einstein Activity Capture using Salesforce's structured migration tool well ahead of that date, and communicate the change to affected sales users early since calendar/email sync interruptions are highly visible if the cutover is rushed.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-163",
+    "domain": "Architecture & Solution Design",
+    "type": "concept",
+    "question": "How do you approach designing a scalable, extensible Salesforce architecture for a new project?",
+    "answer": "Start from data volume, user load, integration count, and expected 3-year growth, not just today's requirements. Favor native platform constructs before custom-building, apply separation-of-concerns (a service layer separate from trigger handlers), and design for future change by centralizing configuration (Custom Metadata) rather than hardcoding it across the codebase.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-164",
+    "domain": "Architecture & Solution Design",
+    "type": "concept",
+    "question": "Design a data model for Projects, Tasks, and Employees where many employees work on many projects.",
+    "answer": "A many-to-many relationship between Projects and Employees via a junction object (e.g. ProjectAssignment) with two Master-Detail/Lookup relationships; Tasks relate to Projects via Master-Detail or Lookup depending on whether a Task should be deletable independently of its Project — the standard junction-object pattern.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-165",
+    "domain": "Architecture & Solution Design",
+    "type": "concept",
+    "question": "How do you decide a requirement has outgrown Salesforce's standard capabilities and needs a different tool?",
+    "answer": "Weigh ongoing maintenance and downstream ripple effects, not just whether it's technically possible. A signal: heavily customized logic that keeps needing new edge cases — ask whether every future change needs a developer, whether performance degrades as data grows, and whether an existing product (CPQ, an ISV app) solves this more sustainably.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-166",
+    "domain": "Architecture & Solution Design",
+    "type": "concept",
+    "question": "A client wants to import 2 million records into production. What do you check before and during the load?",
+    "answer": "Confirm the sharing model/role hierarchy is ready for the volume, use Bulk API with proper batch sizing, watch for data skew (lock contention from too many children under one parent), stage in a full-copy sandbox first, and temporarily disable non-essential automation so 2 million records don't each independently re-trigger single-record-oriented flows.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-167",
+    "domain": "Architecture & Solution Design",
+    "type": "concept",
+    "question": "How do you avoid accumulating technical debt across a multi-phase program?",
+    "answer": "Get architecturally involved early rather than only reacting to incidents, periodically assess org health (Salesforce Optimizer, a documented review), default to out-of-the-box functionality before custom builds, and explicitly ask whether today's solution survives the next 2–3 known roadmap changes.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-168",
+    "domain": "Architecture & Solution Design",
+    "type": "concept",
+    "question": "A stakeholder raises a significant new requirement in the final week before go-live. How do you handle it?",
+    "answer": "Assess priority, feasibility, and dependencies first, then escalate to the sponsor/PM with a clear tradeoff (cost if included now vs. deferring). The outcome is usually infeasible-now, descoped to phase 2, or an accepted timeline shift — the architect's job is surfacing the tradeoff, not making the business call alone.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-169",
+    "domain": "Architecture & Solution Design",
+    "type": "concept",
+    "question": "Roll-up summary field vs. a trigger vs. DLRS — how do you decide?",
+    "answer": "Master-Detail with simple aggregation (SUM/COUNT/MIN/MAX): native roll-up summary field. Lookup relationship or conditional logic: DLRS (declarative, no code). Custom business logic DLRS can't express, or logic needing to integrate with other Apex-driven processes in the same transaction: a custom trigger.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-170",
+    "domain": "Architecture & Solution Design",
+    "type": "concept",
+    "question": "What questions do you ask during discovery to properly scope a new implementation?",
+    "answer": "The 5W+H framework: Why (business outcome), Who (personas/users), What (functional/technical requirements), Where (geography/localization/data residency), When (real deadline drivers), How (the current as-is process, since you can't design a to-be state without understanding what exists today).",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-171",
+    "domain": "Architecture & Solution Design",
+    "type": "concept",
+    "question": "How do you decide between Flow and Apex for a new automation requirement today?",
+    "answer": "Default to Flow (Process Builder/Workflow Rules are retired). Reach for Apex when the requirement needs complex recursive-safe bulk logic, branching that becomes unreadable as a Flow diagram, tight unit-test coverage, or a synchronous mid-transaction external callout — often still exposed to Flow via an @InvocableMethod so admins retain some declarative control.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-172",
+    "domain": "Architecture & Solution Design",
+    "type": "concept",
+    "question": "A legacy org has a bloated, redundant data model that needs simplifying. What's your approach?",
+    "answer": "Audit first (field usage reports, API/Apex references) to separate load-bearing elements from dead weight, design the simplified target model, plan a migration path for existing data, update all dependent reports/automation/integrations, and test extensively before cutover — underestimating the blast radius of 'small' schema changes is the most common failure mode.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-173",
+    "domain": "Architecture & Solution Design",
+    "type": "concept",
+    "question": "How do you present a technical risk to non-technical executive stakeholders?",
+    "answer": "Strip the conversation to business impact and a visual, not implementation detail — a concrete 'what breaks and when' scenario tied to their own growth projections lands better than governor-limit jargon, and always pair the risk with a recommended path forward.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-174",
+    "domain": "Architecture & Solution Design",
+    "type": "scenario",
+    "question": "The client's current CPQ/pricing implementation is heavily customized and keeps breaking with every release. How do you approach the redesign conversation?",
+    "answer": "Understand why it evolved this way before proposing to rebuild it, quantify the actual cost of the current state (support tickets, release-break frequency) to build the business case, then propose a phased redesign migrating the highest-risk customizations first rather than a big-bang rewrite.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-175",
+    "domain": "Architecture & Solution Design",
+    "type": "scenario",
+    "question": "You're evaluating whether an upcoming feature should be native Salesforce or an external microservice.",
+    "answer": "Weigh transactional consistency needs with Salesforce data (favors native), compute intensity or tech-stack needs Salesforce can't offer (favors external), the team's ongoing ability to maintain a separate service, and whether it adds an extra integration point that becomes its own failure mode.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-176",
+    "domain": "Architecture & Solution Design",
+    "type": "scenario",
+    "question": "A merger means two Salesforce orgs must become one. What's your high-level approach?",
+    "answer": "Start with a side-by-side data model/process comparison to find true conflicts before technical merge work; decide org consolidation strategy (a survivor org vs. a fresh target) based on technical debt and future fit, not just size; plan phased data migration with de-duplication rather than a single cutover weekend.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-177",
+    "domain": "Architecture & Solution Design",
+    "type": "scenario",
+    "question": "How do you design so a picklist-driven business process doesn't require a deployment every time a new value/routing rule is added?",
+    "answer": "Move the mapping (e.g. department-to-approver) into a Custom Metadata Type record set rather than hardcoding branches in Apex/Flow — adding a new value becomes a data/config change instead of a code change.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-178",
+    "domain": "Architecture & Solution Design",
+    "type": "scenario",
+    "question": "A junior architect proposes an over-engineered solution (e.g. a full event-driven microservices layer) for a genuinely simple requirement. How do you coach them?",
+    "answer": "Affirm the instinct to think about scale, then walk through cost/benefit concretely against actual (not hypothetical) data volume and team size — teaching the judgment call that not every problem needs the most sophisticated pattern, without discouraging the architectural thinking itself.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-179",
+    "domain": "Architecture & Solution Design",
+    "type": "scenario",
+    "question": "How do you decide the boundary between 'this is Salesforce's job' and 'this belongs in an external system'?",
+    "answer": "Ask where the data's system of record naturally sits (financial ledgers usually belong in an ERP, customer relationship/engagement data belongs in Salesforce) and avoid duplicating business logic in two places — pick one source of truth per entity and have the other system consume/reference it.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "architecture-solution-design-180",
+    "domain": "Architecture & Solution Design",
+    "type": "scenario",
+    "question": "How would you structure a roadmap conversation with a client who wants 'everything' in phase 1?",
+    "answer": "Use a value-versus-effort framing to help the client self-prioritize — group asks into quick wins, foundational must-haves, and nice-to-haves, and sequence around what unlocks the earliest measurable business value, since 'everything at once' usually signals priorities haven't been forced yet.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-181",
+    "domain": "Leadership & Behavioral",
+    "type": "concept",
+    "question": "How do you run code reviews for your team, and what do you actually look for?",
+    "answer": "Beyond syntax: bulkification, sharing/security enforcement, test quality (asserting behavior, not just coverage %), and whether the change fits the org's existing patterns rather than a one-off style. Keep feedback specific to the code, and use reviews as mentoring — explain why, not just what to change.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-182",
+    "domain": "Leadership & Behavioral",
+    "type": "concept",
+    "question": "How do you balance priorities across multiple concurrent projects or clients as a lead?",
+    "answer": "Make workload and constraints visible rather than keeping them in your head, align with each project's PM/sponsor on realistic timelines, and be transparent early when something has to slip — sustainable delivery beats heroics, and credibility depends on setting expectations the team can actually hit.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-183",
+    "domain": "Leadership & Behavioral",
+    "type": "concept",
+    "question": "How do you handle disagreement with a client who insists on an approach you know won't scale?",
+    "answer": "Lead with curiosity about why the current approach was chosen, avoid criticizing it outright, present the scalability concern with concrete evidence (a scenario at 10x volume, a limit that will be hit), and offer the alternative as a recommendation with tradeoffs — letting the client decide rather than framing it as 'you're wrong.'",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-184",
+    "domain": "Leadership & Behavioral",
+    "type": "concept",
+    "question": "Describe your approach to project delivery day to day (Agile/Waterfall/hybrid).",
+    "answer": "Concretely: daily standups, sprint planning/backlog refinement, and retrospectives that actually change how the next sprint runs — agile ceremonies exist to create visibility and catch risk early, not as process for its own sake.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-185",
+    "domain": "Leadership & Behavioral",
+    "type": "concept",
+    "question": "What are your first 30 days like when joining a new team/org as a lead?",
+    "answer": "Prioritize listening over changing things — shadow how users actually work today, understand existing technical debt and why it exists before proposing fixes, and build relationships with the admins/BAs/PMs already there rather than opening with what's 'wrong.'",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-186",
+    "domain": "Leadership & Behavioral",
+    "type": "concept",
+    "question": "How do you mentor an Admin or mid-level developer who wants to grow into a lead/architect role?",
+    "answer": "Be honest it's a different skillset — heavier on stakeholder communication and tradeoff reasoning — while highlighting judgment calls they're likely already making informally, and give stretch assignments (owning a small design decision end-to-end) rather than only theory.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-187",
+    "domain": "Leadership & Behavioral",
+    "type": "concept",
+    "question": "How do you decide what to build in-house vs. buy an AppExchange package?",
+    "answer": "Compare total cost of ownership, not just upfront build cost — ongoing maintenance and release-compatibility burden. Favor buying for well-solved, undifferentiated problems and reserve custom build for genuinely differentiating parts of the business.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-188",
+    "domain": "Leadership & Behavioral",
+    "type": "concept",
+    "question": "A production incident occurs (a deployment broke a business-critical process). How do you lead the response?",
+    "answer": "Stabilize first (rollback/hotfix), communicate honestly and immediately rather than going quiet while investigating, then run a blameless post-mortem turning the root cause into a concrete process change, not just a one-off apology.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-189",
+    "domain": "Leadership & Behavioral",
+    "type": "concept",
+    "question": "How do you measure and drive Salesforce user adoption after go-live?",
+    "answer": "Combine quantitative signals (login frequency, feature-usage dashboards) with qualitative check-ins (are users bypassing Salesforce with spreadsheets). Treat adoption as ongoing coaching, not a one-time training event, and feed gaps back into the roadmap.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-190",
+    "domain": "Leadership & Behavioral",
+    "type": "concept",
+    "question": "How do you decide what to escalate to your manager/sponsor versus handle yourself as a lead?",
+    "answer": "Escalate anything affecting budget/timeline/scope beyond your authority, risks that could harm the client relationship, or decisions needing business-priority information only the sponsor has. Handle technical implementation decisions within agreed scope yourself — over-escalating erodes trust in your judgment.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-191",
+    "domain": "Leadership & Behavioral",
+    "type": "scenario",
+    "question": "Two developers disagree strongly on architectural approach (e.g. Flow vs. Apex) and it's stalling delivery.",
+    "answer": "Time-box the debate, make sure both sides argue from the same facts (data volume, maintenance owner, timeline) rather than preference, and if it's genuinely a judgment call, make the decision yourself and own the tradeoff — indecision has a cost too.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-192",
+    "domain": "Leadership & Behavioral",
+    "type": "scenario",
+    "question": "A team member consistently misses estimates on tickets. How do you address it without demoralizing them?",
+    "answer": "Look at the pattern privately first — underestimating complexity vs. scope creep vs. distractions — and address the specific root cause; involve them in re-estimating together so they build the skill rather than just being told the numbers were wrong afterward.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-193",
+    "domain": "Leadership & Behavioral",
+    "type": "scenario",
+    "question": "You inherit a team with low morale after a difficult previous project. What do you do in your first weeks?",
+    "answer": "Listen first via 1:1s to understand what specifically went wrong from their perspective, then make a small, visible, quick win happen to rebuild trust that things can actually change, rather than opening with a big vision disconnected from their current frustration.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-194",
+    "domain": "Leadership & Behavioral",
+    "type": "scenario",
+    "question": "How do you give critical feedback to a client stakeholder whose configuration choices are causing technical problems?",
+    "answer": "Frame it around shared goals rather than 'you did this wrong,' bring concrete evidence of the problem it's causing, and offer to collaborate on the fix — preserving the relationship while staying honest about the technical reality.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-195",
+    "domain": "Leadership & Behavioral",
+    "type": "scenario",
+    "question": "A key team member resigns mid-project with critical undocumented knowledge. How do you handle continuity?",
+    "answer": "Run structured handoff sessions focused on the highest-risk undocumented areas first, redistribute open work with realistic re-estimation rather than assuming the same velocity, and use the gap as the forcing function to finally document what should have been written down already.",
+    "code": null,
+    "added": "2026-07-18"
+  },
+  {
+    "id": "leadership-behavioral-196",
+    "domain": "Leadership & Behavioral",
+    "type": "scenario",
+    "question": "How do you keep your own hands-on technical skills sharp once most of your time goes to leadership/coordination?",
+    "answer": "Stay embedded in code review and architecture decisions, deliberately carve out time for a hands-on piece of the harder problems rather than delegating everything technical, and treat staying current with platform changes as part of the job, not an optional extra.",
+    "code": null,
+    "added": "2026-07-18"
+  }
+]
