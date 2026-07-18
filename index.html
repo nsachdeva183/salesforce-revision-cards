@@ -69,6 +69,20 @@
   select { font-size: 13px; padding: 6px 10px; border-radius: 8px; border: 1px solid #ddd; background: #fff; color: var(--dark); }
   footer { text-align: center; font-size: 11px; color: #aaa; margin-top: 30px; }
   .empty-state { text-align: center; padding: 60px 20px; color: var(--greytxt); }
+  .sync-row { display: flex; justify-content: center; gap: 10px; margin-top: 14px; }
+  .btn-sync { background: #fff; color: var(--blue); border: 1px solid #d5e2f3; font-size: 12px; font-weight: 600; padding: 8px 14px; border-radius: 8px; }
+  .btn-sync:hover { background: var(--light2); }
+  .sync-msg { text-align: center; font-size: 12px; margin-top: 8px; min-height: 16px; }
+  .sync-msg.ok { color: var(--green); }
+  .sync-msg.err { color: var(--red); }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(20,30,50,0.45); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+  .modal { background: #fff; border-radius: 14px; padding: 22px; max-width: 520px; width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
+  .modal h3 { margin: 0 0 8px; color: var(--dark); font-size: 16px; }
+  .modal p { font-size: 13px; color: var(--greytxt); margin: 0 0 12px; }
+  .modal textarea { width: 100%; height: 110px; font-family: Consolas, Menlo, monospace; font-size: 11px; border: 1px solid #ddd; border-radius: 8px; padding: 10px; resize: vertical; }
+  .modal .btn-row { margin-top: 14px; }
+  .btn-modal-primary { background: var(--dark); color: #fff; flex: 1; }
+  .btn-modal-secondary { background: var(--grey); color: #444; flex: 1; }
 </style>
 </head>
 <body>
@@ -86,7 +100,13 @@
   <div id="cardArea"></div>
 
   <footer>Bank grows weekly · <span id="bankCount">–</span> cards total · progress stored locally in this browser</footer>
+  <div class="sync-row">
+    <button class="btn-sync" onclick="openExport()">⇪ Export progress</button>
+    <button class="btn-sync" onclick="openImport()">⇩ Import progress</button>
+  </div>
+  <div class="sync-msg" id="syncMsg"></div>
 </div>
+<div id="modalRoot"></div>
 
 <script>
 const STORAGE_KEY = "sfRevisionState_v2";
@@ -265,6 +285,82 @@ function renderDone(area) {
 function escapeHtml(str) {
   if (!str) return "";
   return str.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+// ---- export / import progress ----
+function encodeState() {
+  return btoa(unescape(encodeURIComponent(JSON.stringify({ v: 2, exported: new Date().toISOString(), state }))));
+}
+function decodeState(str) {
+  const obj = JSON.parse(decodeURIComponent(escape(atob(str.trim()))));
+  if (!obj || !obj.state || typeof obj.state.progress !== "object") throw new Error("bad payload");
+  return obj.state;
+}
+function syncMsg(text, ok) {
+  const el = document.getElementById("syncMsg");
+  el.textContent = text;
+  el.className = "sync-msg " + (ok ? "ok" : "err");
+  setTimeout(() => { el.textContent = ""; }, 5000);
+}
+function closeModal() { document.getElementById("modalRoot").innerHTML = ""; }
+function openExport() {
+  const code = encodeState();
+  const reviewed = Object.keys(state.progress).length;
+  document.getElementById("modalRoot").innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <h3>Export progress</h3>
+        <p>Copy this code and paste it into "Import progress" on your other device. It contains your review history (${reviewed} card${reviewed===1?"":"s"}).</p>
+        <textarea readonly id="exportCode" onclick="this.select()">${code}</textarea>
+        <div class="btn-row">
+          <button class="btn-modal-primary" onclick="copyExport()">Copy to clipboard</button>
+          <button class="btn-modal-secondary" onclick="closeModal()">Close</button>
+        </div>
+      </div>
+    </div>`;
+}
+function copyExport() {
+  const ta = document.getElementById("exportCode");
+  ta.select();
+  const done = () => { syncMsg("Copied — paste it on your other device.", true); closeModal(); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(ta.value).then(done).catch(() => { document.execCommand("copy"); done(); });
+  } else { document.execCommand("copy"); done(); }
+}
+function openImport() {
+  document.getElementById("modalRoot").innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <h3>Import progress</h3>
+        <p>Paste an export code from another device. This replaces the progress stored in this browser.</p>
+        <textarea id="importCode" placeholder="Paste export code here…"></textarea>
+        <div class="btn-row">
+          <button class="btn-modal-primary" onclick="doImport()">Import</button>
+          <button class="btn-modal-secondary" onclick="closeModal()">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+}
+function doImport() {
+  try {
+    const imported = decodeState(document.getElementById("importCode").value);
+    state = imported;
+    // Rebuild today's queue against this browser's date so nothing is skipped or duplicated
+    state.queue = null;
+    state.queueDate = null;
+    saveState(state);
+    closeModal();
+    syncMsg("Progress imported — rebuilding today's session.", true);
+    const today = todayStr();
+    state.queue = selectTodayQueue(CARDS, state.progress, today, DAILY_LIMIT);
+    state.queueDate = today;
+    state.sessionStats = { easy: 0, medium: 0, difficult: 0 };
+    saveState(state);
+    currentIndex = 0;
+    render();
+  } catch (e) {
+    syncMsg("That code couldn't be read — copy the full export code and try again.", false);
+  }
 }
 
 document.addEventListener("keydown", (e) => {
