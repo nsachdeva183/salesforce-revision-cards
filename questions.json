@@ -1762,5 +1762,77 @@
     "answer": "Stay embedded in code review and architecture decisions, deliberately carve out time for a hands-on piece of the harder problems rather than delegating everything technical, and treat staying current with platform changes as part of the job, not an optional extra.",
     "code": null,
     "added": "2026-07-18"
+  },
+  {
+    "id": "apex-197",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "What are multiline string literals and String.template() in Apex, and when would you use them?",
+    "answer": "From API version 67.0 (Summer '26), triple single-quotes give you real multiline string literals, so JSON payloads, email bodies, and long SOQL no longer need '+ '\\n' +' chains. String.template() does named interpolation with ${variableName} placeholders instead of the positional index-juggling of String.format(). Two gotchas: the newline immediately after the opening ''' is trimmed, and String.template() renders a Datetime in GMT as yyyy-MM-dd HH:mm:ss rather than the user's locale, so format dates yourself if the zone matters.",
+    "code": "String body = '''\n{\n  \"orderNumber\": \"${orderNo}\",\n  \"status\": \"${status}\"\n}''';\n\nString payload = String.template(body, new Map<String, Object>{\n    'orderNo' => o.OrderNumber,\n    'status'  => o.Status\n});",
+    "added": "2026-07-27"
+  },
+  {
+    "id": "apex-198",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "You bump an inherited Apex class to API version 67.0 and it no longer compiles — the WITH SECURITY_ENFORCED clause is rejected. What happened and what's the correct migration?",
+    "answer": "WITH SECURITY_ENFORCED was retired at API version 67.0 and simply doesn't compile any more; replace it with WITH USER_MODE. It isn't a rename — WITH USER_MODE handles polymorphic fields like Owner and Task.WhatId, enforces FLS on the WHERE clause and not just the SELECT list, and reports every access violation on the QueryException instead of only the first. While you're there, remember a 67.0 class with no sharing keyword now defaults to 'with sharing', so re-test any query that previously relied on the old system-mode default.",
+    "code": "// Before (fails to compile at v67)\n// List<Contact> cs = [SELECT Id, Email FROM Contact WITH SECURITY_ENFORCED];\n\n// After\ntry {\n    List<Contact> cs = [SELECT Id, Email FROM Contact WHERE Email != null WITH USER_MODE];\n} catch (QueryException e) {\n    // e now lists every inaccessible field, not just the first\n}",
+    "added": "2026-07-27"
+  },
+  {
+    "id": "lwc-javascript-199",
+    "domain": "LWC & JavaScript",
+    "type": "concept",
+    "question": "What are LWC State Managers (GA in Summer '26), and how do they change how you share state compared with pub/sub or Lightning Message Service?",
+    "answer": "State Managers move data and the logic that mutates it out of components into a dedicated, reusable module built with defineState from @lwc/state, using atom() for reactive state, computed() for derived values, and setAtom() as the only permitted mutation path. defineState returns a factory, so each call yields an isolated instance that unit-tests cleanly without a DOM. Unlike pub/sub or LMS — which broadcast events and leave each subscriber to maintain its own copy — a state manager is a single reactive source of truth components read through .value, with re-rendering handled automatically. Salesforce also ships built-in managers wrapping Lightning Data Service, such as lightning/stateManagerRecord, so reach for those before writing your own.",
+    "code": "// cartStateManager.js\nimport { defineState } from '@lwc/state';\n\nexport default defineState((atom, computed, /* ... */ setAtom) => (initialItems = []) => {\n    const items = atom(initialItems);\n    const total = computed([items], ([list]) =>\n        list.reduce((sum, i) => sum + i.price, 0)\n    );\n    const addItem = (item) => setAtom(items, [...items.value, item]);\n    return { items, total, addItem };\n});",
+    "added": "2026-07-27"
+  },
+  {
+    "id": "lwc-javascript-200",
+    "domain": "LWC & JavaScript",
+    "type": "scenario",
+    "question": "After a release upgrade, your LWC's 'Download CSV' button silently stops working. The code sets an anchor's href to a data: URI. What's the cause and fix?",
+    "answer": "Lightning Web Security added a distortion in Summer '26 that blocks the data: scheme on HTMLAnchorElement.prototype.href, so assigning a data: URL now does nothing. The supported pattern is to build a Blob and use a blob: object URL, which is origin-bound and can be revoked after use. More broadly, run the updated LWS ESLint package and check the LWS Distortion Viewer before upgrading components — this release also distorted Element.getAttribute, the innerHTML/outerHTML getters, MutationObserver.observe, IndexedDB, and Promise.then/catch/finally.",
+    "code": "handleDownload() {\n    const blob = new Blob([this.csv], { type: 'text/csv' });\n    const url = URL.createObjectURL(blob);\n    const a = document.createElement('a');\n    a.href = url;              // blob: URL, not data:\n    a.download = 'export.csv';\n    a.click();\n    URL.revokeObjectURL(url);\n}",
+    "added": "2026-07-27"
+  },
+  {
+    "id": "integration-apis-201",
+    "domain": "Integration & APIs",
+    "type": "scenario",
+    "question": "You inherit several middleware integrations that authenticate with SOAP login() using a username, password, and security token. What do you tell the client about their timeline and target state?",
+    "answer": "SOAP login() on API versions 31.0-64.0 is scheduled for retirement in Summer '27, so any username/password-over-SOAP integration will stop authenticating on that date — this is a hard deadline, not a deprecation warning. The target state is OAuth via external client apps using the JWT bearer flow, with credentials in Named Credentials rather than middleware config. As an interim control, the new 'Any API Auth' user permission lets you restrict who can still authenticate via SOAP login() (it's enforced by default in new orgs), and SOAP API now accepts JWT access tokens in the sessionId header, so you can move auth without rewriting the SOAP payloads themselves.",
+    "code": null,
+    "added": "2026-07-27"
+  },
+  {
+    "id": "integration-apis-202",
+    "domain": "Integration & APIs",
+    "type": "concept",
+    "question": "What are Salesforce Hosted MCP Servers, and how would you expose existing Apex to an external AI client through one?",
+    "answer": "Hosted MCP Servers let any MCP-compatible client — Claude, ChatGPT, Cursor, or a custom agent — talk to your org over the open Model Context Protocol, with Salesforce hosting the server and OAuth handling authentication, so there's no infrastructure to run. Standard servers cover sObject CRUD/SOQL/search, Data 360, and Tableau; custom servers let you choose exactly which tools you expose. To surface your own logic, build a custom server from @InvocableMethod Apex actions, Apex REST endpoints, @AuraEnabled methods, autolaunched Flows, Named Queries, Prompt Builder prompts, or Agentforce agents. The key architectural point for an interview: custom MCP servers respect the org's full sharing and security model, so the running user's permissions still govern what the AI client can read or change.",
+    "code": "public with sharing class OrderStatusAction {\n    public class Request {\n        public Request() {}                       // no-arg constructor required at v67+\n        @InvocableVariable(required=true) public String orderNumber;\n    }\n    @InvocableMethod(label='Get Order Status')\n    public static List<String> run(List<Request> reqs) {\n        // exposed as an MCP tool via a custom hosted MCP server\n        return new List<String>{ 'Shipped' };\n    }\n}",
+    "added": "2026-07-27"
+  },
+  {
+    "id": "agentforce-einstein-ai-203",
+    "domain": "Agentforce & Einstein AI",
+    "type": "scenario",
+    "question": "A client has several agents built in the legacy agent builder and asks whether they need to rebuild them now that Agentforce Builder and Agent Script are GA. How do you advise them?",
+    "answer": "They don't need to rebuild — the one-click upgrade converts subagents, actions, system messages, data, and connections into Agent Script, with an optional reliability optimization pass afterwards. What they do need to plan for is that since the week of July 13, 2026, the New Agent button only opens the new Agentforce Builder, so any new agent is Agent Script from day one and the team needs the skills regardless. The upside of Agent Script is precise, deterministic control blended with agentic reasoning, model pinning per agent rather than relying only on the org-wide setting, and a text artifact that lives in source control and diffs in code review. Migrate one lower-risk agent first and regression-test it in Testing Center before touching the customer-facing ones.",
+    "code": null,
+    "added": "2026-07-27"
+  },
+  {
+    "id": "architecture-solution-design-204",
+    "domain": "Architecture & Solution Design",
+    "type": "concept",
+    "question": "In a Data 360 (Data Cloud) design, what's the difference between a DLO, a DMO, and a platform sObject, and where does Identity Resolution fit?",
+    "answer": "A Data Lake Object is the raw ingested landing table for a source stream; a Data Model Object is the harmonized, canonical entity you map those DLOs onto so downstream consumers query one shape regardless of source; a platform sObject is ordinary CRM data with sharing, triggers, and record-level security. Identity Resolution then stitches records across sources into a Unified Individual using match and reconciliation rules — it's what makes 'one customer view' real rather than aspirational. Two practical details worth naming: querying a DLO in SOQL requires the SET OPTIONS clause with the dataspace (omit it and you get zero rows), and DLO/DMO data is not governed by CRM sharing rules, so access control has to be designed deliberately rather than assumed.",
+    "code": "SELECT Id, Email__c\nFROM Contact_Home__dll\nSET OPTIONS dataspace = 'default', honorEmptyStrings = true",
+    "added": "2026-07-27"
   }
 ]
