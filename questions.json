@@ -1834,5 +1834,68 @@
     "answer": "A Data Lake Object is the raw ingested landing table for a source stream; a Data Model Object is the harmonized, canonical entity you map those DLOs onto so downstream consumers query one shape regardless of source; a platform sObject is ordinary CRM data with sharing, triggers, and record-level security. Identity Resolution then stitches records across sources into a Unified Individual using match and reconciliation rules — it's what makes 'one customer view' real rather than aspirational. Two practical details worth naming: querying a DLO in SOQL requires the SET OPTIONS clause with the dataspace (omit it and you get zero rows), and DLO/DMO data is not governed by CRM sharing rules, so access control has to be designed deliberately rather than assumed.",
     "code": "SELECT Id, Email__c\nFROM Contact_Home__dll\nSET OPTIONS dataspace = 'default', honorEmptyStrings = true",
     "added": "2026-07-27"
+  },
+  {
+    "id": "2026-security-mandates-205",
+    "domain": "2026 Security Mandates",
+    "type": "scenario",
+    "question": "After enabling the Winter '27 'Enable Profile Filtering' release update in a sandbox, an LWC that shows a case owner's profile suddenly renders blank for most users. What changed and how do you fix it?",
+    "answer": "Profile Filtering restricts users to seeing only their own Profile Name unless they hold the View All Profiles permission, so any query that traverses to another user's profile — Owner.Profile.Name, CreatedBy.Profile.Name, a formula field, or a validation rule — now returns null or blocks for ordinary users. The correct fix is to refactor rather than to hand out View All Profiles: drive the behaviour off a Custom Permission, a Permission Set assignment check, or a custom field you control instead of profile name string-matching. If refactoring genuinely isn't feasible, granting View All Profiles is the fallback, but flag it as technical debt because Salesforce is deliberately narrowing this visibility. Audit broadly — Flows, validation rules, sharing rules, Apex, LWC, reports, list views, and custom metadata can all carry the dependency.",
+    "code": "// Fragile — breaks under Profile Filtering\nCase c = [SELECT Id, Owner.Profile.Name FROM Case WHERE Id = :caseId];\nif (c.Owner.Profile.Name == 'Tier 2 Support') { ... }\n\n// Resilient — permission-driven, no cross-user profile read\nBoolean isTier2 = [\n    SELECT COUNT()\n    FROM PermissionSetAssignment\n    WHERE AssigneeId = :c.OwnerId\n      AND PermissionSet.Name = 'Tier_2_Support'\n] > 0;",
+    "added": "2026-08-04"
+  },
+  {
+    "id": "2026-security-mandates-206",
+    "domain": "2026 Security Mandates",
+    "type": "scenario",
+    "question": "A middleware team tells you their Salesforce integration authenticates with the OAuth 2.0 Username-Password flow against a Connected App. What's your advice and what's the target state?",
+    "answer": "That flow stops working from Winter '27, so this is a hard deadline, not a recommendation — it sends the username, password, and security token in the request body, which defeats MFA and leaves credentials in logs. Find every caller by filtering Login History for the OauthUsernamePassword login sub-type, but warn the team that Login History only retains six months, so infrequently-run jobs may not appear and a code/config review of the middleware is still needed. The target state is an External Client App (the successor to Connected Apps) using JWT Bearer for server-to-server or Client Credentials for simple machine flows, with an integration user that has a least-privilege permission set. Once every dependency is migrated, disable the flow in Setup → OAuth and OpenID Connect Settings so it can't creep back in.",
+    "code": null,
+    "added": "2026-08-04"
+  },
+  {
+    "id": "integration-apis-207",
+    "domain": "Integration & APIs",
+    "type": "scenario",
+    "question": "The 'Update Instanced URLs in API Traffic' release update is now enforced in Winter '27. An inherited Apex class builds callback URLs like 'https://na123.salesforce.com/services/data/v62.0/...'. What breaks and how do you remediate?",
+    "answer": "Instance-based hostnames (na123, cs45, and similar) stop being valid API endpoints — all traffic must go through the org's My Domain URL — so hardcoded instance URLs will start failing, and they were already fragile because instances change on org migration or refresh. Replace them with Url.getOrgDomainUrl().toExternalForm() in Apex, or better still, move the callout behind a Named Credential so the endpoint is metadata rather than code. On the inbound side, tell integration partners to stop caching the instance_url returned at login and to use the My Domain host instead. Sweep for the pattern across Apex, LWC, Aura, custom metadata, custom settings, email templates, and any middleware configuration.",
+    "code": "// Fragile\nString endpoint = 'https://na123.salesforce.com/services/data/v67.0/sobjects/Account';\n\n// Correct\nString endpoint = Url.getOrgDomainUrl().toExternalForm()\n    + '/services/data/v67.0/sobjects/Account';\n\n// Best — endpoint and auth live in metadata\nreq.setEndpoint('callout:My_Named_Cred/services/data/v67.0/sobjects/Account');",
+    "added": "2026-08-04"
+  },
+  {
+    "id": "integration-apis-208",
+    "domain": "Integration & APIs",
+    "type": "concept",
+    "question": "What's the difference between standard-volume and high-volume platform events, and what should teams be doing about it now?",
+    "answer": "High-volume platform events are the modern implementation — higher throughput, better scalability, a 72-hour replay window, and durable storage — whereas standard-volume events were deprecated back in Spring '19 and are heading to full retirement in 2027, with a Salesforce-provided migration tool available from Summer '26. The practical difference for a developer is publish behaviour and replay: high-volume events are stored and replayable via Replay ID, so a subscriber that goes down can resume, and 'Publish After Commit' versus 'Publish Immediately' determines whether the event fires only if the transaction succeeds. Migration isn't just a checkbox — you republish the event definition as high-volume and repoint every publisher and subscriber, so audit CometD/Pub-Sub API clients, Flows, and Apex triggers on the event before you start.",
+    "code": "// Publish\nList<Order_Update__e> events = new List<Order_Update__e>{\n    new Order_Update__e(Order_Id__c = o.Id, Status__c = o.Status)\n};\nList<Database.SaveResult> results = EventBus.publish(events);\n\n// Subscriber trigger — always checkpoint the Replay ID\ntrigger OrderUpdateTrigger on Order_Update__e (after insert) {\n    for (Order_Update__e e : Trigger.New) { /* ... */ }\n    EventBus.TriggerContext.currentContext().setResumeCheckpoint(\n        Trigger.New[Trigger.New.size() - 1].ReplayId\n    );\n}",
+    "added": "2026-08-04"
+  },
+  {
+    "id": "lwc-javascript-209",
+    "domain": "LWC & JavaScript",
+    "type": "scenario",
+    "question": "QA reports that after the Winter '27 accessibility release update, a custom LWC dashboard tile clips its content and hides a button when the browser is zoomed to 200%. How do you diagnose and fix it?",
+    "answer": "The Winter '27 accessibility updates change how cards, docked containers, menu lists, and panels reflow at 200% magnification or higher, which exposes custom components that were built with fixed pixel heights or absolute positioning inside those containers. Reproduce it first at 200% and 400% zoom with the update's Test Run enabled, then replace fixed px dimensions with rem/min-height, let SLDS grid utilities handle layout instead of absolute positioning, and make sure overflow isn't set to hidden on a container that now needs to grow. WCAG 1.4.4 requires content to remain usable at 200% zoom without loss of function, so treat this as a real defect rather than cosmetic — and add zoom to your regression checklist, since it's a common accessibility audit finding.",
+    "code": "/* Fragile */\n.tile { height: 180px; overflow: hidden; }\n.tile__action { position: absolute; bottom: 12px; right: 12px; }\n\n/* Resilient */\n.tile {\n  min-height: 11.25rem;   /* grows with zoom instead of clipping */\n  display: flex;\n  flex-direction: column;\n}\n.tile__action { margin-top: auto; align-self: flex-end; }",
+    "added": "2026-08-04"
+  },
+  {
+    "id": "apex-210",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "Users intermittently get 'concurrent requests limit exceeded' errors on a record page, but no single transaction is close to the CPU limit. What's happening?",
+    "answer": "You're hitting the org-wide concurrent long-running request limit: only 10 synchronous Apex requests that each run longer than 5 seconds may be in flight at once per org, and the eleventh is rejected regardless of how much CPU headroom any individual transaction has. It's a concurrency ceiling, not a per-transaction governor, which is why load testing a single user never reproduces it — typically a slow @AuraEnabled method behind a @wire fires on every page load and each call sits just over 5 seconds. Fix it by getting the method under 5 seconds (selective SOQL with indexed filters, narrower field lists, no queries in loops), adding cacheable=true so repeat calls are served from the client cache, and pushing anything genuinely long-running into Queueable or Batch Apex with the UI polling or subscribing to a platform event for the result.",
+    "code": "// Trigger for the pileup: slow, uncached, fires on every page load\n@AuraEnabled\npublic static List<Account> getHierarchy(Id accId) { /* ~6s */ }\n\n// Better: cacheable read + async for the heavy work\n@AuraEnabled(cacheable=true)\npublic static List<Account> getHierarchy(Id accId) { /* fast, selective */ }\n\n@AuraEnabled\npublic static Id startRecalc(Id accId) {\n    return System.enqueueJob(new HierarchyRecalcQueueable(accId));\n}",
+    "added": "2026-08-04"
+  },
+  {
+    "id": "agentforce-einstein-ai-211",
+    "domain": "Agentforce & Einstein AI",
+    "type": "scenario",
+    "question": "A client asks how you'd regression-test an Agentforce agent before each release, the way you'd run Apex tests. What's your answer?",
+    "answer": "Testing Center (GA since May 2026) is the platform answer — you build a test set of utterances with the expected topic, expected actions, and expected outcome, run it in bulk against the agent, and review a pass/fail report, so it functions as a regression suite you re-run after every prompt, topic, or action change. Pair that with unit-level discipline: the Apex behind each invocable action still needs ordinary Apex tests, because Testing Center validates routing and response quality, not your business logic. Build the test set from real transcripts including the awkward and out-of-scope utterances, since the failure mode that matters is an agent confidently taking the wrong action, not a wrong-sounding sentence. Wire the run into the release checklist and treat a drop in topic-match rate as a release blocker.",
+    "code": null,
+    "added": "2026-08-04"
   }
 ]
