@@ -1897,5 +1897,68 @@
     "answer": "Testing Center (GA since May 2026) is the platform answer — you build a test set of utterances with the expected topic, expected actions, and expected outcome, run it in bulk against the agent, and review a pass/fail report, so it functions as a regression suite you re-run after every prompt, topic, or action change. Pair that with unit-level discipline: the Apex behind each invocable action still needs ordinary Apex tests, because Testing Center validates routing and response quality, not your business logic. Build the test set from real transcripts including the awkward and out-of-scope utterances, since the failure mode that matters is an agent confidently taking the wrong action, not a wrong-sounding sentence. Wire the run into the release checklist and treat a drop in topic-match rate as a release blocker.",
     "code": null,
     "added": "2026-08-04"
+  },
+  {
+    "id": "apex-212",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "After Winter '27, a developer proposes deleting the chunking logic from a document-generation Queueable because 'the heap limit is bigger now.' How do you respond?",
+    "answer": "Winter '27 did raise the Apex heap limit — from 6 MB to 10 MB synchronous and from 12 MB to 25 MB asynchronous — but more headroom isn't a reason to stop designing for bounded memory. Data volumes grow, managed-package code may still be installed in orgs on different timelines, and a job that only works because it barely fits 25 MB will fail again the first time a big customer shows up. Keep the chunking, measure with Limits.getHeapSize() against Limits.getLimitHeapSize() so the code adapts to whichever limit applies, and release large collections (set to null, use SOQL for-loops) as you go. If you need sandbox behaviour to match a production org that's still on the old caps, the 'Enforce the Summer '26 Apex heap limit' setting in Apex Settings reproduces them.",
+    "code": "for (List<Attachment> batch : [SELECT Id, Body FROM Attachment WHERE ParentId IN :ids]) {\n    process(batch);\n    if (Limits.getHeapSize() > Limits.getLimitHeapSize() * 0.7) {\n        // checkpoint and continue in a fresh transaction\n        System.enqueueJob(new DocGenQueueable(remainingIds()));\n        return;\n    }\n}",
+    "added": "2026-11-15"
+  },
+  {
+    "id": "lwc-javascript-213",
+    "domain": "LWC & JavaScript",
+    "type": "concept",
+    "question": "Complex template expressions are now GA in LWC. Do they replace getters, and how do you decide which to use?",
+    "answer": "Complex template expressions let you write JavaScript-style expressions — ternaries, optional chaining, simple arithmetic, comparisons — directly inside {} in the template, so you no longer need a one-line getter just to compute a label or a CSS class. They don't replace getters: logic that's reused, has business meaning, needs a unit test, or does anything more than trivial formatting still belongs in the JS class, where Jest can test it and reviewers can find it. A good team rule is 'presentation-only and readable at a glance goes in the template; anything with a business rule goes in a getter.' Check the component's API version and the documented limitations before adopting them, and don't use them as an excuse to grow large inline logic in markup.",
+    "code": "<!-- Before: needed a getter -->\n<span class={statusClass}>{statusLabel}</span>\n\n<!-- After: presentation-only logic inline -->\n<span class={record.isOverdue ? 'slds-text-color_error' : ''}>\n    {record.owner?.name ?? 'Unassigned'}\n</span>",
+    "added": "2026-11-15"
+  },
+  {
+    "id": "lwc-javascript-214",
+    "domain": "LWC & JavaScript",
+    "type": "scenario",
+    "question": "The UX team wants to reuse a vendor's framework-agnostic web component (a custom element like <vendor-gantt>) inside an LWC. The old approach was an iframe. What do you do now?",
+    "answer": "Third-party web components are now generally available in LWC: you import the vendor's script (typically as a static resource), then render the custom element in your template with the lwc:external directive so LWC treats it as a native custom element and passes properties and listens to its events normally. This needs Lightning Web Security enabled, because Lightning Locker doesn't support third-party web components, so confirm the org is on LWS first. Salesforce doesn't support the vendor's code itself, so security-review the library, pin its version in the static resource, and wrap it in your own LWC so the rest of the app depends on your interface, not the vendor's. Compared with an iframe you get shared styling, real data binding and no postMessage plumbing.",
+    "code": "<template>\n    <vendor-gantt lwc:external\n        tasks={tasks}\n        ontaskmoved={handleTaskMoved}>\n    </vendor-gantt>\n</template>",
+    "added": "2026-11-15"
+  },
+  {
+    "id": "2026-security-mandates-215",
+    "domain": "2026 Security Mandates",
+    "type": "scenario",
+    "question": "A client has 20+ Connected Apps, including one CLI tool that logs in with the OAuth 2.0 Device Flow. Salesforce has announced Connected App support ends by Summer '27. What's your migration plan?",
+    "answer": "Start with an inventory: list every Connected App with its OAuth flows, scopes, owning team and last-used date (Login History and the OAuth usage page), and retire the ones nobody uses. The Device Flow is the urgent item — a release update removes it from Connected Apps and from external client apps that have no callback URL, enforced in late November 2026 ahead of Spring '27 — so move that tool to Web Server flow with PKCE or JWT Bearer now. Migrate the rest to External Client Apps, which default to a closed security posture and separate the developer's app settings from the admin's policies, and use the move to tighten scopes and swap any remaining username-password integrations to JWT Bearer or Client Credentials. Sequence it by risk, test each integration in a full sandbox, and keep the old app disabled rather than deleted for one release as a rollback path.",
+    "code": null,
+    "added": "2026-11-15"
+  },
+  {
+    "id": "apex-216",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "A nightly integration enqueues a Queueable per inbound record and the org keeps hitting the 24-hour asynchronous Apex execution limit. Someone suggests turning on Elastic Async Apex. Your view?",
+    "answer": "Elastic Async Apex Jobs (beta, and in Winter '27 extended to Batch alongside Future and Queueable) gives extra async capacity beyond the daily allocation, capped at the lower of your licensed limit or 2 million jobs — useful as a safety valve for genuine spikes. But one job per record is the real problem: it burns the allocation, floods the flex queue, and creates locking contention. Bulkify first — have the integration land records in a staging object and process them with one Batch or a self-chaining Queueable that handles a few hundred records per execution, using Finalizers for retry and error logging. Only after that would I enable elastic capacity, and because it's beta I'd keep monitoring AsyncApexJob volumes rather than relying on it in production.",
+    "code": "// Anti-pattern: one job per record\nfor (Inbound__c r : records) System.enqueueJob(new SyncOne(r.Id));\n\n// Better: one job that chains over chunks\nSystem.enqueueJob(new SyncChunk(recordIds, 0));",
+    "added": "2026-11-15"
+  },
+  {
+    "id": "agentforce-einstein-ai-217",
+    "domain": "Agentforce & Einstein AI",
+    "type": "scenario",
+    "question": "A service agent can issue refunds. Compliance insists the agent must ALWAYS verify the customer's identity and check the refund limit before the refund action runs — 'usually' isn't good enough. How do you build that?",
+    "answer": "Don't rely on topic instructions alone, because the LLM decides whether to follow them; use the deterministic parts of Agentforce Builder's Agent Script (hybrid reasoning) to enforce the order. Model identity verification as a required step that sets a verified variable, and make the refund action available only when that variable is true and the amount is within limit, so the model physically can't call it out of sequence. Put the hard rules inside the invocable Apex too — re-check the limit and the user's access server-side and throw a clear error if they fail — so the guarantee holds even if the agent configuration changes later. Then prove it with Testing Center cases that try to skip verification or ask for an over-limit refund, and use the builder's reasoning traces to confirm the action was blocked.",
+    "code": null,
+    "added": "2026-11-15"
+  },
+  {
+    "id": "leadership-behavioral-218",
+    "domain": "Leadership & Behavioral",
+    "type": "scenario",
+    "question": "Each of the three yearly Salesforce releases has broken something in your org. As the lead, how do you build a repeatable release-readiness process?",
+    "answer": "Make it a calendar ritual, not a reaction: when the preview sandboxes upgrade (about six weeks before production) a named owner reads the release notes and the Release Updates page and logs every item that touches your org — enforced updates, API version changes, retirements — with an owner and a due date. Keep at least one sandbox on the preview, run the full Apex test suite and your critical UI and integration smoke tests there, and enable pending release updates in that sandbox first so breaks show up weeks early, not on upgrade weekend. Share a one-page summary with business stakeholders covering what changes for users and what the team is fixing. After each release, hold a short retro and add any surprise to the checklist so the same class of issue doesn't recur.",
+    "code": null,
+    "added": "2026-11-15"
   }
 ]
