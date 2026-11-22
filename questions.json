@@ -1960,5 +1960,68 @@
     "answer": "Make it a calendar ritual, not a reaction: when the preview sandboxes upgrade (about six weeks before production) a named owner reads the release notes and the Release Updates page and logs every item that touches your org — enforced updates, API version changes, retirements — with an owner and a due date. Keep at least one sandbox on the preview, run the full Apex test suite and your critical UI and integration smoke tests there, and enable pending release updates in that sandbox first so breaks show up weeks early, not on upgrade weekend. Share a one-page summary with business stakeholders covering what changes for users and what the team is fixing. After each release, hold a short retro and add any surprise to the checklist so the same class of issue doesn't recur.",
     "code": null,
     "added": "2026-11-15"
+  },
+  {
+    "id": "2026-security-mandates-219",
+    "domain": "2026 Security Mandates",
+    "type": "scenario",
+    "question": "A quarterly finance sync that has worked for years suddenly fails with 'invalid_grant: expired access/refresh token' — nobody changed anything. What happened and how do you fix it properly?",
+    "answer": "Since Winter '27, Salesforce enforces a 30-day idle time-to-live on OAuth refresh tokens (sandboxes from late October 2026, production from November 4, 2026), so a token unused for more than 30 days is revoked even though the app config never changed. The quick fix is a one-time re-authorization, but that only buys another 30 days for a job that runs every 90. The proper fix for a server-to-server job is to stop relying on a stored user refresh token at all: move it to an External Client App using the JWT Bearer or Client Credentials flow, which mints a fresh access token on every run. Then audit every other low-frequency integration (year-end jobs, DR tooling, BI connectors) before they hit the same failure.",
+    "code": null,
+    "added": "2026-11-22"
+  },
+  {
+    "id": "apex-220",
+    "domain": "Apex",
+    "type": "concept",
+    "question": "What is the RunRelevantTests test level, and how do the @IsTest(testFor) and @IsTest(critical) annotations change which tests run in a deployment?",
+    "answer": "RunRelevantTests (beta since Spring '26) lets Salesforce choose the tests for a deployment by analysing the components in the payload and their dependencies, instead of running every local test. You can steer it with @IsTest(testFor='ApexClass:...') to tie a test class to the code it covers, and @IsTest(critical=true) to mark tests that must run on every deployment no matter what changed (API 66.0+). The 75% coverage requirement still applies to each class and trigger being deployed, so it speeds up deployments without lowering the bar. As a lead I'd trial it in CI and sandbox deployments first, keep a full RunLocalTests run on a nightly or pre-release schedule, and only use it in production pipelines once the team trusts which tests it selects.",
+    "code": "@IsTest(testFor='ApexClass:InvoiceService, ApexTrigger:InvoiceTrigger')\nprivate class InvoiceServiceTest { /* ... */ }\n\n@IsTest(critical=true)\nprivate class SmokeTests { /* runs on every deploy */ }\n\n// CLI\n// sf project deploy start --test-level RunRelevantTests",
+    "added": "2026-11-22"
+  },
+  {
+    "id": "lwc-javascript-221",
+    "domain": "LWC & JavaScript",
+    "type": "scenario",
+    "question": "With Salesforce Multi-Framework (React and Angular now GA), a team with strong React skills wants to build all new UI in React instead of LWC. How do you advise them?",
+    "answer": "Multi-Framework is a good fit for standalone, app-like experiences such as a full-page portal or an internal tool where the team's React skills, component libraries and routing pay off, and its Data SDK still enforces CRUD, FLS and sharing on every request. But LWC is still the native choice for anything that lives inside Lightning: record-page components, App Builder and Flow screen components, Lightning Message Service, and Lightning Data Service caching all assume LWC. There are packaging limits too: site-based Multi-Framework apps can't go into managed packages yet. I'd set a simple rule: LWC for components embedded in Salesforce pages, Multi-Framework for whole standalone apps, and agree it up front so the codebase doesn't split into two UI stacks.",
+    "code": null,
+    "added": "2026-11-22"
+  },
+  {
+    "id": "apex-222",
+    "domain": "Apex",
+    "type": "scenario",
+    "question": "A record page calls an Apex method that rebuilds the same large config map (tax rules from several custom metadata types and custom settings) on every load, and CPU time is creeping up. How would you use Platform Cache here?",
+    "answer": "Cache the computed map in the Org cache with Cache.CacheBuilder, so it's built once and served to every user until it expires or is invalidated, rather than recomputed per transaction. A CacheBuilder's doLoad() runs only on a cache miss, so callers never need null checks, and you should always treat the cache as best-effort because entries can be evicted at any time. Use the Session cache instead when data is user-specific, and keep keys alphanumeric and values under the 100 KB per-item limit. Finally, add invalidation (Cache.Org.remove) wherever the source data changes, or set a sensible TTL, so admins' config edits show up without waiting hours.",
+    "code": "public class TaxRuleCache implements Cache.CacheBuilder {\n    public Object doLoad(String key) {\n        return TaxRuleService.buildRuleMap(); // expensive build, runs only on miss\n    }\n}\n\n// Caller\nMap<String, TaxRule> rules = (Map<String, TaxRule>)\n    Cache.Org.get(TaxRuleCache.class, 'taxRules');",
+    "added": "2026-11-22"
+  },
+  {
+    "id": "integration-apis-223",
+    "domain": "Integration & APIs",
+    "type": "scenario",
+    "question": "Each sales rep must call an external quoting API as themselves (their own OAuth token), not via a shared service account. How do you design this with Named and External Credentials?",
+    "answer": "Create an External Credential with an OAuth authentication protocol and a Per User principal, and link a Named Credential (the endpoint) to it. Grant access to that principal through a permission set, and each rep authorises once from their personal settings, so Salesforce stores and refreshes a separate token per user. Apex just calls 'callout:Quoting_API/...' and the platform injects the running user's token, which means the external system's audit trail and permissions reflect the real person. Use a Named Principal only for genuine system-to-system calls, and handle the 'user hasn't authenticated yet' error in the UI with a clear prompt rather than a raw exception.",
+    "code": "HttpRequest req = new HttpRequest();\nreq.setEndpoint('callout:Quoting_API/v2/quotes');\nreq.setMethod('POST');\nreq.setBody(JSON.serialize(payload));\nHttpResponse res = new Http().send(req); // running user's token injected",
+    "added": "2026-11-22"
+  },
+  {
+    "id": "agentforce-einstein-ai-224",
+    "domain": "Agentforce & Einstein AI",
+    "type": "scenario",
+    "question": "A Prompt Builder field-generation template must summarise an Account's open escalated Cases, but merge fields can't filter related lists that way. How do you ground the prompt with Apex?",
+    "answer": "Write an Apex class with an @InvocableMethod whose CapabilityType matches the template type, then add it to the template as an Apex merge field. The method receives the template inputs (such as the Account record), runs a selective SOQL query in user mode for the escalated Cases, and returns a compact text block in the Prompt field of the response. Keep the output short and pre-formatted (top N records, only the fields the model needs) to control token usage and avoid leaking data the user can't see. Then test it with the template preview against real records, because the Einstein Trust Layer masks data but doesn't fix a badly scoped query.",
+    "code": "public class EscalatedCaseGrounding {\n  @InvocableMethod(CapabilityType='PromptTemplateType://einstein_gpt__fieldCompletion')\n  public static List<Response> getCases(List<Request> reqs) {\n    Id accId = reqs[0].objectToSummarize.Id;\n    String txt = '';\n    for (Case c : [SELECT CaseNumber, Subject, Priority FROM Case\n                   WHERE AccountId = :accId AND IsEscalated = true AND IsClosed = false\n                   WITH USER_MODE ORDER BY CreatedDate DESC LIMIT 10]) {\n      txt += c.CaseNumber + ' | ' + c.Priority + ' | ' + c.Subject + '\\n';\n    }\n    Response r = new Response(); r.Prompt = txt;\n    return new List<Response>{ r };\n  }\n  public class Request { @InvocableVariable public Account objectToSummarize; }\n  public class Response { @InvocableVariable public String Prompt; }\n}",
+    "added": "2026-11-22"
+  },
+  {
+    "id": "leadership-behavioral-225",
+    "domain": "Leadership & Behavioral",
+    "type": "scenario",
+    "question": "Your developers now generate much of their Apex and LWC with AI tools such as Agentforce Vibes. Output has gone up, but so have subtle bugs. How do you adjust your team's review and quality process?",
+    "answer": "Make it clear that the developer who commits AI-generated code owns it as if they had written it by hand, so they need to be able to explain every line in review. Strengthen the automated gates the AI can't bypass: Code Analyzer and PMD rules in CI, required user-mode or sharing checks, bulk tests with 200+ records, and meaningful assertions instead of coverage-only tests. Add a short checklist for things AI tools often get wrong, such as SOQL in loops, missing FLS enforcement, hard-coded IDs and invented API methods. Share team-wide prompt guidelines and good examples, so the AI produces code in your patterns (trigger framework, selectors) instead of a different style every time.",
+    "code": null,
+    "added": "2026-11-22"
   }
 ]
